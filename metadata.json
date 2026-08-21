@@ -1,0 +1,10 @@
+{
+  "name": "learnVN_official",
+  "description": "Ứng dụng học tiếng Việt thông minh với AI: Quét ảnh OCR, học từ vựng Flashcard, luyện đọc và phân tích ngữ pháp tiếng Việt.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

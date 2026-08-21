@@ -1,0 +1,428 @@
+import React, { useState, useEffect } from "react";
+import { 
+  Camera, 
+  BookOpen, 
+  Languages, 
+  Settings, 
+  RefreshCw, 
+  FileText,
+  ChevronRight,
+  ChevronLeft,
+  Key,
+  MessageCircle,
+  Sparkles,
+  Gamepad2
+} from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { Vocabulary, AppConfig, ReadingSentence, GrammarPoint } from "./types";
+import { geminiService } from "./services/geminiService";
+import { googleSheetService } from "./services/googleSheetService";
+import { useLanguage } from "./contexts/LanguageContext";
+import LanguageSelector from "./components/LanguageSelector";
+
+// Sub-components
+import OCRTab from "./components/OCRTab";
+import VocabTab from "./components/VocabTab";
+import ReadingTab from "./components/ReadingTab";
+import GrammarTab from "./components/GrammarTab";
+import ChatTab from "./components/ChatTab";
+import GameTab from "./components/GameTab";
+import ConfigScreen, { DEFAULT_SHEET_URL, DEFAULT_SCRIPT_URL } from "./components/ConfigScreen";
+
+export const DEFAULT_CONFIG: AppConfig = {
+  sheetUrl: DEFAULT_SHEET_URL,
+  scriptUrl: DEFAULT_SCRIPT_URL,
+  vocabSheetName: "từ vựng",
+  readingSheetName: "luyện đọc",
+  grammarSheetName: "ngữ pháp",
+  ocrSheetName: "OCR"
+};
+
+export default function App() {
+  const { t } = useLanguage();
+  const [activeTab, setActiveTab] = useState<string>("ocr");
+  const [config, setConfig] = useState<AppConfig | null>(DEFAULT_CONFIG);
+  const [vocabList, _setVocabList] = useState<Vocabulary[]>([]);
+  const setVocabList = React.useCallback((value: Vocabulary[] | ((prev: Vocabulary[]) => Vocabulary[])) => {
+    _setVocabList(prev => {
+      const next = typeof value === "function" ? value(prev) : value;
+      return next.map((v, i) => {
+        if (v.id) return v;
+        return {
+          ...v,
+          id: `${Date.now()}-${i}-${Math.random().toString(36).substring(2, 9)}`
+        };
+      });
+    });
+  }, []);
+  const [readingSentences, setReadingSentences] = useState<ReadingSentence[]>([]);
+  const [grammarPoints, setGrammarPoints] = useState<GrammarPoint[]>([]);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // Filter States (Shared between Vocab and Game)
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterStatus, setFilterStatus] = useState<"all" | "mastered" | "unmastered">("all");
+  const [sortOrder, setSortOrder] = useState<"newest" | "alpha">("newest");
+  const [selectedWordTypes, setSelectedWordTypes] = useState<string[]>([]);
+  const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
+
+  // Load from local storage
+  useEffect(() => {
+    const savedConfig = localStorage.getItem("tiengtrungAI_config");
+    const savedVocab = localStorage.getItem("tiengtrungAI_vocab");
+    const savedReading = localStorage.getItem("tiengtrungAI_reading");
+    const savedGrammar = localStorage.getItem("tiengtrungAI_grammar");
+
+    if (savedConfig) {
+      try {
+        const parsed = JSON.parse(savedConfig);
+        // If old template link was saved, update to user's new default
+        if (parsed.sheetUrl && parsed.sheetUrl.includes("1wdRVB4pEoc3ohZEjZkriGcK9UjatbvmwogKIKp2GlCE")) {
+          parsed.sheetUrl = DEFAULT_SHEET_URL;
+          parsed.scriptUrl = DEFAULT_SCRIPT_URL;
+        }
+        setConfig(parsed);
+      } catch {
+        setConfig(DEFAULT_CONFIG);
+      }
+    } else {
+      setConfig(DEFAULT_CONFIG);
+    }
+    if (savedVocab) setVocabList(JSON.parse(savedVocab));
+    if (savedReading) setReadingSentences(JSON.parse(savedReading));
+    if (savedGrammar) setGrammarPoints(JSON.parse(savedGrammar));
+  }, []);
+
+  // Save to local storage
+  useEffect(() => {
+    if (config) localStorage.setItem("tiengtrungAI_config", JSON.stringify(config));
+    localStorage.setItem("tiengtrungAI_vocab", JSON.stringify(vocabList));
+    localStorage.setItem("tiengtrungAI_reading", JSON.stringify(readingSentences));
+    localStorage.setItem("tiengtrungAI_grammar", JSON.stringify(grammarPoints));
+  }, [config, vocabList, readingSentences, grammarPoints]);
+
+  const handleSync = async () => {
+    if (!config?.scriptUrl || !config?.sheetUrl) return;
+    setIsSyncing(true);
+    try {
+      const sheetId = extractSheetId(config.sheetUrl);
+      const res = await googleSheetService.syncFromSheet(
+        config.scriptUrl, 
+        sheetId,
+        config.vocabSheetName,
+        config.readingSheetName,
+        config.grammarSheetName
+      );
+      
+      if (res) {
+        setVocabList(res.vocab);
+        setReadingSentences(res.reading);
+        setGrammarPoints(res.grammar);
+      } else {
+        alert(t.configSyncFailed);
+      }
+    } catch (e) {
+      console.error(e);
+      alert(t.configSyncNetworkError);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleSaveConfig = async (newConfig: AppConfig) => {
+    setConfig(newConfig);
+    localStorage.setItem("tiengtrungAI_config", JSON.stringify(newConfig));
+    setIsSyncing(true);
+    try {
+      const sheetId = extractSheetId(newConfig.sheetUrl);
+      const res = await googleSheetService.syncFromSheet(
+        newConfig.scriptUrl, 
+        sheetId,
+        newConfig.vocabSheetName,
+        newConfig.readingSheetName,
+        newConfig.grammarSheetName
+      );
+      if (res) {
+        setVocabList(res.vocab);
+        setReadingSentences(res.reading);
+        setGrammarPoints(res.grammar);
+      }
+    } catch (e) {
+      console.error("Auto sync on save failed:", e);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!config?.scriptUrl || !config?.sheetUrl) return;
+    setIsSyncing(true);
+    const sheetId = extractSheetId(config.sheetUrl);
+    await googleSheetService.syncToSheet(
+      config.scriptUrl, 
+      sheetId, 
+      vocabList, 
+      readingSentences, 
+      grammarPoints,
+      config.vocabSheetName,
+      config.readingSheetName,
+      config.grammarSheetName
+    );
+    setIsSyncing(false);
+  };
+
+  const extractSheetId = (url: string) => {
+    const match = url.match(/\/d\/(.*?)(\/|$)/);
+    return match ? match[1] : url;
+  };
+
+  const handleAIError = async (error: any) => {
+    const errorMsg = typeof error === 'string' ? error : JSON.stringify(error);
+    if (errorMsg.includes("429") || errorMsg.includes("RESOURCE_EXHAUSTED")) {
+      if (window.aistudio) {
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        if (!hasKey) {
+          alert(t.aiQuotaWarning);
+          await window.aistudio.openSelectKey();
+          return true; // Handled
+        } else {
+          alert(t.configQuotaWarning);
+        }
+      } else {
+        alert(t.aiQuotaWarning);
+      }
+    }
+    return false;
+  };
+
+  const handleAddSingleVocab = async (word: string) => {
+    if (vocabList.some(v => v.chinese === word)) return;
+    try {
+      const enriched = await geminiService.enrichVocabulary(word);
+      const newItem: Vocabulary = {
+        chinese: word,
+        pinyin: enriched.pinyin || "",
+        amBoi: enriched.amBoi || "",
+        meaning: enriched.meaning || "",
+        hanViet: enriched.hanViet || "",
+        wordType: enriched.wordType || "",
+        topic: enriched.topic || "Chung",
+        isMastered: false
+      };
+      setVocabList(prev => [...prev, newItem]);
+    } catch (error) {
+      handleAIError(error);
+    }
+  };
+
+  if (!config) {
+    const savedConfigStr = localStorage.getItem("tiengtrungAI_config");
+    const initialConfig = savedConfigStr ? JSON.parse(savedConfigStr) : null;
+    return <ConfigScreen initialConfig={initialConfig} onSave={handleSaveConfig} onSync={handleSync} />;
+  }
+
+  return (
+    <div className="min-h-screen bg-neutral-50 flex flex-col font-sans text-neutral-900">
+      {/* Header */}
+      <header className="bg-white border-b border-neutral-200 px-4 py-3 flex justify-between items-center sticky top-0 z-50">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center text-white font-bold text-sm">
+            AI
+          </div>
+          <h1 className="text-xl font-bold tracking-tight text-neutral-800">{t.appName}</h1>
+        </div>
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Language Switcher Dropdown */}
+          <LanguageSelector />
+
+          <button 
+            onClick={async () => {
+              if (window.aistudio) {
+                await window.aistudio.openSelectKey();
+              } else {
+                alert(t.onlyAiStudio);
+              }
+            }}
+            className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors"
+            title={t.apiKeyConfig}
+          >
+            <Key className="w-5 h-5" />
+          </button>
+          <button 
+            onClick={handleSync}
+            disabled={isSyncing}
+            className="p-2 text-neutral-500 hover:bg-neutral-100 rounded-xl transition-colors disabled:opacity-50"
+            title={t.syncFromSheet}
+          >
+            <RefreshCw className={`w-5 h-5 ${isSyncing ? 'animate-spin' : ''}`} />
+          </button>
+          <button 
+            onClick={() => setConfig(null)}
+            className="p-2 text-neutral-500 hover:bg-neutral-100 rounded-xl transition-colors"
+            title={t.settings}
+          >
+            <Settings className="w-5 h-5" />
+          </button>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="flex-1 overflow-y-auto pb-20">
+        <AnimatePresence mode="wait">
+          {activeTab === "ocr" && (
+            <OCRTab 
+              key="ocr"
+              config={config}
+              onError={handleAIError}
+              onResult={(result) => {
+                // Update Reading Sentences
+                setReadingSentences(prev => [...result.sentences, ...prev]);
+                
+                // Update Vocabulary (avoid duplicates)
+                const newVocab = result.words.filter(w => !vocabList.some(v => v.chinese === w.chinese));
+                
+                // Add new vocabulary items directly
+                setVocabList(prev => [...prev, ...newVocab]);
+                
+                // Analyze grammar for the whole text
+                geminiService.analyzeGrammar(result.originalText).then(points => {
+                  setGrammarPoints(prev => [...points, ...prev]);
+                }).catch(error => {
+                  handleAIError(error);
+                });
+
+                setActiveTab("reading");
+              }}
+            />
+          )}
+          {activeTab === "vocab" && (
+            <VocabTab 
+              key="vocab"
+              vocabList={vocabList}
+              setVocabList={setVocabList}
+              onUpload={handleUpload}
+              isSyncing={isSyncing}
+              onError={handleAIError}
+              // Lifted Filter Props
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              filterStatus={filterStatus}
+              setFilterStatus={setFilterStatus}
+              sortOrder={sortOrder}
+              setSortOrder={setSortOrder}
+              selectedWordTypes={selectedWordTypes}
+              setSelectedWordTypes={setSelectedWordTypes}
+              selectedTopics={selectedTopics}
+              setSelectedTopics={setSelectedTopics}
+            />
+          )}
+          {activeTab === "reading" && (
+            <ReadingTab 
+              key="reading"
+              sentences={readingSentences}
+              setSentences={setReadingSentences}
+              vocabList={vocabList}
+              onUpload={handleUpload}
+              isSyncing={isSyncing}
+              onAnalyzeGrammar={async (text) => {
+                const points = await geminiService.analyzeGrammar(text);
+                setGrammarPoints(prev => [...points, ...prev]);
+                setActiveTab("grammar");
+              }}
+              onAddVocab={handleAddSingleVocab}
+              onError={handleAIError}
+            />
+          )}
+          {activeTab === "grammar" && (
+            <GrammarTab 
+              key="grammar"
+              points={grammarPoints}
+              setPoints={setGrammarPoints}
+              onUpload={handleUpload}
+              isSyncing={isSyncing}
+            />
+          )}
+          {activeTab === "chat" && (
+            <ChatTab 
+              key="chat"
+              onError={handleAIError}
+            />
+          )}
+          {activeTab === "game" && (
+            <GameTab 
+              key="game"
+              vocabList={vocabList}
+              // Shared filters
+              searchQuery={searchQuery}
+              filterStatus={filterStatus}
+              sortOrder={sortOrder}
+              selectedWordTypes={selectedWordTypes}
+              selectedTopics={selectedTopics}
+              onError={handleAIError}
+              onAddVocab={handleAddSingleVocab}
+              onToggleMastery={async (chinese) => {
+                setVocabList(prev => prev.map(v => 
+                  v.chinese === chinese ? { ...v, isMastered: !v.isMastered } : v
+                ));
+              }}
+            />
+          )}
+        </AnimatePresence>
+      </main>
+
+      {/* Bottom Navigation */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-neutral-200 flex justify-around items-center h-16 px-1 z-50 overflow-x-auto scrollbar-none">
+        <NavButton 
+          active={activeTab === "ocr"} 
+          onClick={() => setActiveTab("ocr")} 
+          icon={<Camera className="w-5 h-5 md:w-6 md:h-6" />} 
+          label={t.navOcr} 
+        />
+        <NavButton 
+          active={activeTab === "vocab"} 
+          onClick={() => setActiveTab("vocab")} 
+          icon={<BookOpen className="w-5 h-5 md:w-6 md:h-6" />} 
+          label={t.navVocab} 
+        />
+        <NavButton 
+          active={activeTab === "reading"} 
+          onClick={() => setActiveTab("reading")} 
+          icon={<Languages className="w-5 h-5 md:w-6 md:h-6" />} 
+          label={t.navReading} 
+        />
+        <NavButton 
+          active={activeTab === "game"} 
+          onClick={() => setActiveTab("game")} 
+          icon={<Gamepad2 className="w-5 h-5 md:w-6 md:h-6" />} 
+          label={t.navExplore} 
+        />
+        <NavButton 
+          active={activeTab === "grammar"} 
+          onClick={() => setActiveTab("grammar")} 
+          icon={<FileText className="w-5 h-5 md:w-6 md:h-6" />} 
+          label={t.navGrammar} 
+        />
+        <NavButton 
+          active={activeTab === "chat"} 
+          onClick={() => setActiveTab("chat")} 
+          icon={<MessageCircle className="w-5 h-5 md:w-6 md:h-6" />} 
+          label={t.navChat} 
+        />
+      </nav>
+    </div>
+  );
+}
+
+function NavButton({ active, onClick, icon, label }: { active: boolean, onClick: () => void, icon: React.ReactNode, label: string }) {
+  return (
+    <button 
+      onClick={onClick}
+      className={`flex flex-col items-center justify-center flex-1 h-full transition-colors relative ${active ? 'text-emerald-600' : 'text-neutral-400 hover:text-neutral-600'}`}
+    >
+      {icon}
+      <span className="text-[10px] mt-1 font-semibold whitespace-nowrap">{label}</span>
+      {active && <motion.div layoutId="nav-indicator" className="absolute bottom-0 w-12 h-1 bg-emerald-600 rounded-t-full" />}
+    </button>
+  );
+}
+
