@@ -1,4 +1,4 @@
-// Unified Text-To-Speech Service with native voice verification and Google TTS fallback
+// Unified Text-To-Speech Service with native voice verification and reliable audio streaming
 
 export type SupportedLang = "vi-VN" | "zh-CN" | "en-US" | "vi" | "zh" | "en";
 
@@ -6,6 +6,7 @@ class TTSService {
   private currentAudio: HTMLAudioElement | null = null;
   private voices: SpeechSynthesisVoice[] = [];
   private sequenceAborted: boolean = false;
+  private audioCache: Map<string, string> = new Map();
 
   constructor() {
     this.initVoices();
@@ -16,7 +17,10 @@ class TTSService {
 
     const updateVoices = () => {
       try {
-        this.voices = window.speechSynthesis.getVoices();
+        const v = window.speechSynthesis.getVoices();
+        if (v && v.length > 0) {
+          this.voices = v;
+        }
       } catch (e) {
         console.warn("Could not retrieve speechSynthesis voices:", e);
       }
@@ -32,21 +36,23 @@ class TTSService {
    * Intelligently detect if a text contains Chinese characters or Vietnamese
    */
   public detectLanguage(text: string, fallbackLang: SupportedLang = "vi-VN"): "vi-VN" | "zh-CN" | "en-US" {
-    if (!text) return "vi-VN";
+    if (!text || !text.trim()) return "vi-VN";
 
-    // Check for Chinese characters (Hanzi / Kanji range)
-    const hasChinese = /[\u4e00-\u9fa5\u3400-\u4dbf]/.test(text);
+    const clean = text.trim();
+
+    // Check for Chinese characters (Hanzi)
+    const hasChinese = /[\u4e00-\u9fa5\u3400-\u4dbf]/.test(clean);
     if (hasChinese) {
       return "zh-CN";
     }
 
     // Check for Vietnamese-specific diacritics
-    const hasVietnamese = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴÈÉẸẺẼÊỀẾỆỂỄÌÍỊỈĨÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠÙÚỤỦŨƯỪỨỰỬỮỲÝỴỶỸĐ]/.test(text);
-    if (hasVietnamese) {
+    const hasVietnameseDiacritics = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴÈÉẸẺẼÊỀẾỆỂỄÌÍỊỈĨÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠÙÚỤỦŨƯỪỨỰỬỮỲÝỴỶỸĐ]/i.test(clean);
+    if (hasVietnameseDiacritics) {
       return "vi-VN";
     }
 
-    // Normalize fallback
+    // Check fallback preference
     const norm = fallbackLang.toLowerCase();
     if (norm.startsWith("zh")) return "zh-CN";
     if (norm.startsWith("en")) return "en-US";
@@ -55,19 +61,38 @@ class TTSService {
 
   /**
    * Find a genuine native voice for the given language prefix.
-   * Returns NULL if no genuine voice exists (prevents browser from defaulting to English voice!).
+   * Returns NULL if no genuine native voice exists (prevents browser from defaulting to English voice for Vietnamese!).
    */
   private findNativeVoice(langPrefix: string): SpeechSynthesisVoice | null {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return null;
-    const voices = this.voices.length > 0 ? this.voices : window.speechSynthesis.getVoices();
+    
+    let voices = this.voices;
+    if (!voices || voices.length === 0) {
+      try {
+        voices = window.speechSynthesis.getVoices() || [];
+        if (voices.length > 0) this.voices = voices;
+      } catch {
+        voices = [];
+      }
+    }
+
     if (!voices || voices.length === 0) return null;
 
     if (langPrefix === "vi") {
       return (
         voices.find((v) => {
-          const l = v.lang.replace("_", "-").toLowerCase();
-          const n = v.name.toLowerCase();
-          return l.startsWith("vi") || n.includes("vietnam") || n.includes("vietnamese") || n.includes("tiếng việt");
+          const l = (v.lang || "").replace("_", "-").toLowerCase();
+          const n = (v.name || "").toLowerCase();
+          return (
+            l.startsWith("vi") ||
+            n.includes("vietnam") ||
+            n.includes("vietnamese") ||
+            n.includes("tiếng việt") ||
+            n.includes("hoaimy") ||
+            n.includes("nam") ||
+            n.includes("linh") ||
+            n.includes("mai")
+          );
         }) || null
       );
     }
@@ -75,8 +100,8 @@ class TTSService {
     if (langPrefix === "zh") {
       return (
         voices.find((v) => {
-          const l = v.lang.replace("_", "-").toLowerCase();
-          const n = v.name.toLowerCase();
+          const l = (v.lang || "").replace("_", "-").toLowerCase();
+          const n = (v.name || "").toLowerCase();
           return (
             l.startsWith("zh") ||
             l.startsWith("cmn") ||
@@ -89,12 +114,11 @@ class TTSService {
             n.includes("hanhan") ||
             n.includes("taiwan") ||
             n.includes("hong kong") ||
-            n.includes("cantonese") ||
             n.includes("xiaoxiao") ||
             n.includes("yunxi") ||
-            n.includes("meijia") ||
-            n.includes("sin-ji") ||
-            n.includes("hiu-gaai")
+            n.includes("ting-ting") ||
+            n.includes("tingting") ||
+            n.includes("meijia")
           );
         }) || null
       );
@@ -103,8 +127,8 @@ class TTSService {
     if (langPrefix === "en") {
       return (
         voices.find((v) => {
-          const l = v.lang.replace("_", "-").toLowerCase();
-          const n = v.name.toLowerCase();
+          const l = (v.lang || "").replace("_", "-").toLowerCase();
+          const n = (v.name || "").toLowerCase();
           return l.startsWith("en") || n.includes("english");
         }) || null
       );
@@ -114,16 +138,15 @@ class TTSService {
   }
 
   /**
-   * Play high-quality native audio via Google Translate TTS stream
+   * Play high-quality studio audio via backend /api/tts proxy endpoint
    */
-  private playGoogleTTS(text: string, langCode: "vi" | "zh-CN" | "en", rate: number = 1): Promise<void> {
+  private playProxyTTS(text: string, langCode: "vi" | "zh-CN" | "en", rate: number = 1): Promise<void> {
     return new Promise((resolve) => {
       try {
         this.stopAudioOnly();
 
-        // Encode clean text (max 200 chars per request for reliability)
         const cleanText = text.trim().slice(0, 200);
-        const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${langCode}&client=tw-ob&q=${encodeURIComponent(cleanText)}`;
+        const url = `/api/tts?lang=${encodeURIComponent(langCode)}&text=${encodeURIComponent(cleanText)}`;
 
         const audio = new Audio(url);
         this.currentAudio = audio;
@@ -137,29 +160,35 @@ class TTSService {
           resolve();
         };
 
-        audio.onerror = () => {
+        audio.onerror = (err) => {
+          console.warn("Proxy TTS failed, attempting fallback:", err);
           this.currentAudio = null;
-          // Fallback if network blocked: try generic Web Speech
-          if (typeof window !== "undefined" && "speechSynthesis" in window) {
-            try {
-              const u = new SpeechSynthesisUtterance(cleanText);
-              u.lang = langCode === "vi" ? "vi-VN" : langCode === "zh-CN" ? "zh-CN" : "en-US";
-              u.rate = rate;
-              u.onend = () => resolve();
-              u.onerror = () => resolve();
-              window.speechSynthesis.speak(u);
-              return;
-            } catch {}
-          }
-          resolve();
+
+          // Direct google fallback with referrerPolicy
+          const directUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${langCode}&client=tw-ob&q=${encodeURIComponent(cleanText)}`;
+          const fallbackAudio = new Audio();
+          this.currentAudio = fallbackAudio;
+          fallbackAudio.src = directUrl;
+          if (rate && rate !== 1) fallbackAudio.playbackRate = rate;
+          fallbackAudio.onended = () => {
+            this.currentAudio = null;
+            resolve();
+          };
+          fallbackAudio.onerror = () => {
+            this.currentAudio = null;
+            resolve();
+          };
+          fallbackAudio.play().catch(() => resolve());
         };
 
         audio.play().catch((err) => {
-          console.warn("Google TTS audio playback note:", err);
+          console.warn("Audio play rejected (user interaction needed or stopped):", err);
+          this.currentAudio = null;
           resolve();
         });
       } catch (err) {
-        console.warn("Google TTS initiation error:", err);
+        console.warn("Proxy TTS error:", err);
+        this.currentAudio = null;
         resolve();
       }
     });
@@ -177,7 +206,7 @@ class TTSService {
 
   /**
    * Main Speak method
-   * Automatically picks the correct language and true native voice.
+   * Prioritizes verified native speech voice, or plays backend audio proxy.
    */
   public speak(
     text: string,
@@ -193,49 +222,48 @@ class TTSService {
         return;
       }
 
-      // Auto-detect or normalize language
-      const targetLang = specifiedLang 
-        ? (specifiedLang.toLowerCase().startsWith("zh") ? "zh-CN" : specifiedLang.toLowerCase().startsWith("en") ? "en-US" : this.detectLanguage(text, specifiedLang))
-        : this.detectLanguage(text, "vi-VN");
+      const cleanText = text.trim();
 
+      // Detect language: prioritize Chinese characters, then Vietnamese
+      const targetLang = this.detectLanguage(cleanText, specifiedLang || "vi-VN");
       const langPrefix = targetLang === "zh-CN" ? "zh" : targetLang === "en-US" ? "en" : "vi";
       const matchedVoice = this.findNativeVoice(langPrefix);
 
-      // If we have a verified native voice installed on user's machine, use it
+      // If we have a verified native voice installed on user's machine, use Web Speech API
       if (matchedVoice && typeof window !== "undefined" && "speechSynthesis" in window) {
         try {
-          const utterance = new SpeechSynthesisUtterance(text.trim());
+          const utterance = new SpeechSynthesisUtterance(cleanText);
           utterance.voice = matchedVoice;
           utterance.lang = matchedVoice.lang || targetLang;
           utterance.rate = rate;
 
           utterance.onend = () => resolve();
-          utterance.onerror = () => {
-            // Fall back to Google TTS if native synthesis has an error
+          utterance.onerror = (e) => {
+            console.warn("SpeechSynthesis error, fallback to proxy TTS:", e);
             const gLang = langPrefix === "zh" ? "zh-CN" : langPrefix === "en" ? "en" : "vi";
-            this.playGoogleTTS(text, gLang, rate).then(resolve);
+            this.playProxyTTS(cleanText, gLang, rate).then(resolve);
           };
 
           window.speechSynthesis.speak(utterance);
           return;
         } catch (e) {
-          console.warn("SpeechSynthesis error, falling back to Google TTS:", e);
+          console.warn("SpeechSynthesis exception:", e);
         }
       }
 
-      // If NO native voice is installed in browser, use Google TTS
-      // This prevents Vietnamese from being read in English!
+      // If NO verified native voice exists in browser (prevents English voice from reading Vietnamese!),
+      // stream authentic studio pronunciation from server proxy
       const gLang = langPrefix === "zh" ? "zh-CN" : langPrefix === "en" ? "en" : "vi";
-      this.playGoogleTTS(text, gLang, rate).then(resolve);
+      this.playProxyTTS(cleanText, gLang, rate).then(resolve);
     });
   }
 
   /**
-   * Sequential speech for learning flow / explore vocabulary
+   * Sequential speech for Explore Tab & Learning Flows
    */
   public async speakSequence(
     elements: { text: string; lang?: SupportedLang }[],
-    delayBetween: number = 250
+    delayBetween: number = 300
   ): Promise<void> {
     this.sequenceAborted = false;
     this.stop();
@@ -264,4 +292,3 @@ class TTSService {
 }
 
 export const ttsService = new TTSService();
-

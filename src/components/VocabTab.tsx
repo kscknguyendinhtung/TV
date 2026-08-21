@@ -691,7 +691,7 @@ function FlashcardView({ list, onToggleMastered, onEdit, onDelete, initialIndex 
   const displayIndex = shuffleOrder[currentIndex] ?? currentIndex;
   const currentItem = list[displayIndex];
 
-  const speak = (text: string, lang: "vi-VN" | "zh-CN" | "en-US" = "vi-VN") => {
+  const speak = (text: string, lang?: "vi-VN" | "zh-CN" | "en-US") => {
     ttsService.speak(text, lang);
   };
 
@@ -714,11 +714,10 @@ function FlashcardView({ list, onToggleMastered, onEdit, onDelete, initialIndex 
   // Auto-speak on flip
   useEffect(() => {
     if (currentItem) {
-      const meaningLang = language === "zh" ? "zh-CN" : language === "en" ? "en-US" : "vi-VN";
       if (isFlipped) {
         // Speak the back side
         if (frontSide === "chinese") {
-          speak(currentItem.meaning, meaningLang);
+          speak(currentItem.meaning);
         } else {
           speak(currentItem.chinese, "vi-VN");
         }
@@ -727,11 +726,11 @@ function FlashcardView({ list, onToggleMastered, onEdit, onDelete, initialIndex 
         if (frontSide === "chinese") {
           speak(currentItem.chinese, "vi-VN");
         } else {
-          speak(currentItem.meaning, meaningLang);
+          speak(currentItem.meaning);
         }
       }
     }
-  }, [isFlipped, currentItem, frontSide, language]);
+  }, [isFlipped, currentItem, frontSide]);
 
   const handleShuffle = () => {
     const newOrder = [...shuffleOrder].sort(() => Math.random() - 0.5);
@@ -839,10 +838,14 @@ function FlashcardView({ list, onToggleMastered, onEdit, onDelete, initialIndex 
             <button 
               onClick={(e) => { 
                 e.stopPropagation(); 
-                const meaningLang = language === "zh" ? "zh-CN" : language === "en" ? "en-US" : "vi-VN";
-                speak(frontSide === "chinese" ? currentItem.chinese : currentItem.meaning, frontSide === "chinese" ? "vi-VN" : meaningLang); 
+                if (frontSide === "chinese") {
+                  speak(currentItem.chinese, "vi-VN");
+                } else {
+                  speak(currentItem.meaning);
+                }
               }}
-              className="absolute top-6 right-6 p-2 bg-neutral-50 rounded-full text-neutral-300 hover:text-emerald-600"
+              className="absolute top-6 right-6 p-2 bg-neutral-50 rounded-full text-neutral-400 hover:text-emerald-600 cursor-pointer shadow-sm"
+              title="Nghe phát âm"
             >
               <Volume2 className="w-6 h-6" />
             </button>
@@ -868,10 +871,14 @@ function FlashcardView({ list, onToggleMastered, onEdit, onDelete, initialIndex 
             <button 
               onClick={(e) => { 
                 e.stopPropagation(); 
-                const meaningLang = language === "zh" ? "zh-CN" : language === "en" ? "en-US" : "vi-VN";
-                speak(frontSide === "chinese" ? currentItem.meaning : currentItem.chinese, frontSide === "chinese" ? meaningLang : "vi-VN"); 
+                if (frontSide === "chinese") {
+                  speak(currentItem.meaning);
+                } else {
+                  speak(currentItem.chinese, "vi-VN");
+                }
               }}
-              className="absolute top-6 left-6 p-2 bg-white/10 rounded-full text-white/50 hover:text-white"
+              className="absolute top-6 left-6 p-2 bg-white/10 rounded-full text-white/70 hover:text-white cursor-pointer shadow-sm"
+              title="Nghe phát âm"
             >
               <Volume2 className="w-6 h-6" />
             </button>

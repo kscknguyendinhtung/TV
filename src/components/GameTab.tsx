@@ -1,25 +1,27 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { 
-  Search, 
-  RotateCcw, 
-  Link as LinkIcon, 
-  Split, 
-  ArrowRightLeft,
-  ChevronRight,
-  BookOpen,
-  Sparkles,
-  Loader2,
-  CheckCircle2,
-  ArrowRight,
-  Play,
-  Trophy,
-  Volume2
-} from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
 import { Vocabulary } from "../types";
 import { geminiService } from "../services/geminiService";
-import { useLanguage } from "../contexts/LanguageContext";
 import { ttsService } from "../services/ttsService";
+import { 
+  Trophy, 
+  RotateCcw, 
+  ArrowRight, 
+  Volume2, 
+  Sparkles, 
+  BookOpen, 
+  CheckCircle2, 
+  Link as LinkIcon, 
+  ArrowRightLeft, 
+  Search, 
+  Play, 
+  Pause,
+  Loader2 
+} from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { useLanguage } from "../contexts/LanguageContext";
+
+type GameView = 'explore' | 'quiz';
+type QuizMode = 'zh-vi' | 'vi-zh'; // 'zh-vi': Question in Vietnamese, Options in Meaning. 'vi-zh': Question in Meaning, Options in Vietnamese.
 
 interface GameData {
   related: { chinese: string; pinyin: string; meaning: string; reason: string; hanViet: string }[];
@@ -27,56 +29,53 @@ interface GameData {
   characterAnalysis: { char: string; components?: string; meaning: string; examples: { chinese: string; pinyin: string; meaning: string; hanViet: string }[] }[];
 }
 
-type GameView = 'explore' | 'quiz';
-type QuizMode = 'zh-vi' | 'vi-zh';
-
-interface MillionaireGameProps {
+interface MillionaireQuizProps {
   vocabList: Vocabulary[];
   filteredVocab: Vocabulary[];
   onBack: () => void;
-  onError: (error: any) => void;
+  onError: (error: any) => void | Promise<any>;
 }
 
-const MillionaireQuiz = ({ vocabList, filteredVocab, onBack, onError }: MillionaireGameProps) => {
-  const { t, language } = useLanguage();
+const MillionaireQuiz: React.FC<MillionaireQuizProps> = ({ vocabList, filteredVocab, onBack }) => {
+  const { t } = useLanguage();
   const [quizMode, setQuizMode] = useState<QuizMode>('zh-vi');
+  const [timerLimit, setTimerLimit] = useState(10);
   const [status, setStatus] = useState<'idle' | 'playing' | 'result' | 'gameover'>('idle');
   const [currentQuestion, setCurrentQuestion] = useState<Vocabulary | null>(null);
   const [options, setOptions] = useState<string[]>([]);
-  const [correctAnswer, setCorrectAnswer] = useState<string>("");
+  const [correctAnswer, setCorrectAnswer] = useState<string>('');
+  const [timeLeft, setTimeLeft] = useState(timerLimit);
   const [score, setScore] = useState(0);
-  const [timerLimit, setTimerLimit] = useState(3);
-  const [timeLeft, setTimeLeft] = useState(3);
   const [streak, setStreak] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
 
-  const speakVN = (text: string) => {
-    ttsService.speak(text, 'vi-VN', 0.95);
+  const speakText = (text: string, forceLang?: "vi-VN" | "zh-CN" | "en-US") => {
+    ttsService.speak(text, forceLang, 0.95);
   };
 
-  const speakMeaning = (text: string) => {
-    const targetLang = language === 'vi' ? 'vi-VN' : language === 'zh' ? 'zh-CN' : 'en-US';
-    ttsService.speak(text, targetLang, 0.95);
-  };
-
-  const speak = (vnText: string, meaningText: string, mode: QuizMode, phase: 'start' | 'correct' = 'start') => {
+  const speakQuestionPrompt = (q: Vocabulary, mode: QuizMode) => {
     ttsService.stop();
-    
-    if (phase === 'start') {
-      if (mode === 'zh-vi') speakVN(vnText);
-      else speakMeaning(meaningText);
+    if (mode === 'zh-vi') {
+      // Question is Vietnamese word (e.g., 'thành công')
+      speakText(q.chinese, 'vi-VN');
     } else {
-      if (mode === 'zh-vi') speakMeaning(meaningText);
-      else speakVN(vnText);
+      // Question is Meaning (e.g., '成功' in Chinese or 'Success' in English)
+      speakText(q.meaning);
     }
   };
 
-  const primeTTS = () => {
-    // No-op with ttsService
+  const speakAnswerResult = (q: Vocabulary, mode: QuizMode) => {
+    ttsService.stop();
+    if (mode === 'zh-vi') {
+      // Correct answer is Meaning
+      speakText(q.meaning);
+    } else {
+      // Correct answer is Vietnamese word
+      speakText(q.chinese, 'vi-VN');
+    }
   };
 
   const generateQuestion = () => {
-    primeTTS();
     if (filteredVocab.length < 4) {
       alert(t.gameNeedFourWords);
       onBack();
@@ -100,12 +99,8 @@ const MillionaireQuiz = ({ vocabList, filteredVocab, onBack, onError }: Milliona
     setSelectedAnswer(null);
     setStatus('playing');
 
-    setTimeout(() => speak(question.chinese, question.meaning, quizMode, 'start'), 50);
+    setTimeout(() => speakQuestionPrompt(question, quizMode), 100);
   };
-
-  useEffect(() => {
-    window.speechSynthesis.getVoices();
-  }, []);
 
   useEffect(() => {
     let timer: any;
@@ -124,16 +119,15 @@ const MillionaireQuiz = ({ vocabList, filteredVocab, onBack, onError }: Milliona
   }, [status, timeLeft]);
 
   const handleAnswer = (answer: string | null) => {
-    primeTTS();
     setSelectedAnswer(answer);
     if (answer === correctAnswer) {
       if (currentQuestion) {
-        speak(currentQuestion.chinese, currentQuestion.meaning, quizMode, 'correct');
+        speakAnswerResult(currentQuestion, quizMode);
       }
       setScore(prev => prev + (streak + 1) * 100);
       setStreak(prev => prev + 1);
       setStatus('result');
-      setTimeout(() => generateQuestion(), 1200);
+      setTimeout(() => generateQuestion(), 1300);
     } else {
       setStatus('gameover');
     }
@@ -194,12 +188,12 @@ const MillionaireQuiz = ({ vocabList, filteredVocab, onBack, onError }: Milliona
           <div className="space-y-2 pt-2">
             <button 
               onClick={generateQuestion}
-              className="w-full py-4 sm:py-5 bg-indigo-600 text-white rounded-[1.5rem] sm:rounded-[2rem] font-bold text-lg sm:text-xl shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-3"
+              className="w-full py-4 sm:py-5 bg-indigo-600 text-white rounded-[1.5rem] sm:rounded-[2rem] font-bold text-lg sm:text-xl shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-3 cursor-pointer"
             >
               {t.gameStart} <ArrowRight className="w-5 h-5 sm:w-6 sm:h-6" />
             </button>
             
-            <button onClick={onBack} className="w-full py-2 text-neutral-400 font-bold text-sm hover:text-neutral-600 transition-colors">
+            <button onClick={onBack} className="w-full py-2 text-neutral-400 font-bold text-sm hover:text-neutral-600 transition-colors cursor-pointer">
               {t.gameBack}
             </button>
           </div>
@@ -219,16 +213,15 @@ const MillionaireQuiz = ({ vocabList, filteredVocab, onBack, onError }: Milliona
           <p className="text-sm sm:text-base text-neutral-500 font-medium italic">{t.gameStoppedAt}</p>
           <p className="text-4xl sm:text-5xl font-black text-indigo-600 mt-2 sm:mt-4">${score.toLocaleString()}</p>
         </div>
-
-        <div className="w-full px-6 space-y-3 sm:space-y-4">
+        <div className="w-full px-6 space-y-3">
           <button 
             onClick={generateQuestion}
-            className="w-full py-3 sm:py-4 bg-indigo-600 text-white rounded-xl sm:rounded-2xl font-bold text-base sm:text-lg shadow-lg hover:shadow-indigo-100 transition-all"
+            className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold text-lg shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 cursor-pointer"
           >
-            {t.gamePlayAgain}
+            <RotateCcw className="w-5 h-5" /> {t.playAgain}
           </button>
-          <button onClick={onBack} className="w-full py-2 sm:py-3 text-neutral-400 font-bold text-sm hover:text-neutral-600 transition-colors">
-            {t.gameBackToExplore}
+          <button onClick={() => setStatus('idle')} className="w-full py-3 text-neutral-400 font-bold text-sm hover:text-neutral-600 transition-colors cursor-pointer">
+            {t.gameBack}
           </button>
         </div>
       </div>
@@ -236,37 +229,39 @@ const MillionaireQuiz = ({ vocabList, filteredVocab, onBack, onError }: Milliona
   }
 
   return (
-    <div className="space-y-4 sm:space-y-10 py-2 sm:py-6 max-w-md mx-auto h-full flex flex-col overflow-y-auto sm:overflow-hidden">
-      <div className="flex justify-between items-center px-4 shrink-0">
-        <div className="flex flex-col">
-          <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">{t.gamePrize}</span>
-          <span className="text-2xl font-black text-amber-500 tracking-tighter">${score.toLocaleString()}</span>
+    <div className="flex-1 flex flex-col justify-between max-w-xl mx-auto w-full p-4 sm:p-6 overflow-hidden">
+      {/* Header Info */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-2 sm:gap-3 bg-white px-3 sm:px-4 py-2 rounded-2xl shadow-sm border border-neutral-100">
+          <Trophy className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500 shrink-0" />
+          <div>
+            <span className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block leading-none">{t.gamePrize}</span>
+            <span className="text-sm sm:text-base font-black text-neutral-800">${score.toLocaleString()}</span>
+          </div>
         </div>
-        <div className="relative w-16 h-16 flex items-center justify-center">
-           <svg className="w-full h-full -rotate-90">
-             <circle cx="32" cy="32" r="28" fill="none" stroke="#f3f4f6" strokeWidth="6" />
-             <circle 
-               cx="32" cy="32" r="28" fill="none" 
-               stroke={timeLeft > (timerLimit / 3) ? "#6366f1" : "#f43f5e"} 
-               strokeWidth="6"
-               strokeDasharray={176}
-               strokeDashoffset={176 - (176 * timeLeft / timerLimit)}
-               className="transition-all duration-1000 ease-linear"
-             />
-           </svg>
-           <span className={`absolute text-xl font-black ${timeLeft > 1 ? 'text-indigo-600' : 'text-rose-600'}`}>{timeLeft}s</span>
+
+        {/* Timer Gauge */}
+        <div className="flex flex-col items-center">
+          <div className="text-center font-black text-lg sm:text-xl text-indigo-600 leading-none">{timeLeft}s</div>
+          <div className="w-20 sm:w-24 h-1.5 bg-neutral-200 rounded-full mt-1.5 overflow-hidden">
+            <div 
+              className={`h-full transition-all duration-1000 rounded-full ${timeLeft <= 3 ? 'bg-rose-500' : 'bg-indigo-600'}`} 
+              style={{ width: `${(timeLeft / timerLimit) * 100}%` }}
+            />
+          </div>
         </div>
-        <div className="flex flex-col items-end">
-          <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">{t.gameStreak}</span>
-          <div className="flex gap-1">
-             {[...Array(5)].map((_, i) => (
-               <div key={i} className={`w-2 h-2 rounded-full ${i < streak % 5 ? 'bg-indigo-500' : 'bg-neutral-200'}`} />
-             ))}
+
+        <div className="flex items-center gap-2 sm:gap-3 bg-white px-3 sm:px-4 py-2 rounded-2xl shadow-sm border border-neutral-100">
+          <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-500 shrink-0" />
+          <div>
+            <span className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block leading-none">{t.gameStreak}</span>
+            <span className="text-sm sm:text-base font-black text-neutral-800">x{streak}</span>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col justify-center gap-4 sm:gap-12 px-2 min-h-0">
+      {/* Main Question Box */}
+      <div className="my-auto space-y-4 sm:space-y-6">
         <div className="bg-white p-6 sm:p-10 rounded-[2rem] sm:rounded-[3rem] shadow-xl border-b-4 sm:border-b-8 border-indigo-100 text-center relative">
           <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-6 py-1 bg-indigo-600 text-white rounded-full text-[10px] font-black uppercase tracking-widest">{t.gameQuestionLabel}</div>
           <h4 className="text-2xl sm:text-4xl font-black text-neutral-800 break-words leading-tight">
@@ -281,8 +276,8 @@ const MillionaireQuiz = ({ vocabList, filteredVocab, onBack, onError }: Milliona
           )}
           
           <button 
-            onClick={() => currentQuestion && speak(currentQuestion.chinese, currentQuestion.meaning, quizMode, status === 'result' ? 'correct' : 'start')}
-            className="mt-4 p-2 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 transition-colors active:scale-90"
+            onClick={() => currentQuestion && speakQuestionPrompt(currentQuestion, quizMode)}
+            className="mt-4 p-2 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 transition-colors active:scale-90 cursor-pointer"
             title={t.gameListenAgain}
           >
             <Volume2 className="w-5 h-5" />
@@ -292,7 +287,7 @@ const MillionaireQuiz = ({ vocabList, filteredVocab, onBack, onError }: Milliona
         <div className="grid grid-cols-1 gap-2 sm:gap-4 overflow-y-auto pr-1">
           {options.map((opt, i) => {
             const optPinyin = quizMode === 'vi-zh' ? vocabList.find(v => v.chinese === opt)?.pinyin : null;
-            let btnClass = "bg-white border-2 border-neutral-100 text-neutral-600";
+            let btnClass = "bg-white border-2 border-neutral-100 text-neutral-600 hover:border-indigo-200";
             if (selectedAnswer === opt) {
               btnClass = opt === correctAnswer ? "bg-emerald-500 border-emerald-500 text-white scale-105" : "bg-rose-500 border-rose-500 text-white";
             } else if (selectedAnswer && opt === correctAnswer) {
@@ -304,7 +299,7 @@ const MillionaireQuiz = ({ vocabList, filteredVocab, onBack, onError }: Milliona
                 key={i}
                 disabled={status !== 'playing'}
                 onClick={() => handleAnswer(opt)}
-                className={`w-full py-3 sm:py-5 px-4 sm:px-6 rounded-xl sm:rounded-2xl font-bold text-base sm:text-lg text-center transition-all flex items-center justify-between group min-h-[4rem] sm:h-22 ${btnClass} active:scale-95`}
+                className={`w-full py-3 sm:py-5 px-4 sm:px-6 rounded-xl sm:rounded-2xl font-bold text-base sm:text-lg text-center transition-all flex items-center justify-between group min-h-[4rem] sm:h-22 ${btnClass} active:scale-95 cursor-pointer`}
               >
                 <div className="flex items-center gap-3 sm:gap-4 w-full">
                    <div className={`w-6 h-6 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-[10px] sm:text-xs font-black shrink-0 ${selectedAnswer === opt ? 'bg-white/20' : 'bg-neutral-100 group-hover:bg-indigo-50 group-hover:text-indigo-600'}`}>
@@ -313,6 +308,16 @@ const MillionaireQuiz = ({ vocabList, filteredVocab, onBack, onError }: Milliona
                    <div className="flex-1 text-center min-w-0">
                      <span className="block leading-tight truncate sm:whitespace-normal">{opt}</span>
                      {optPinyin && <span className={`block text-[10px] sm:text-xs italic font-medium truncate ${selectedAnswer === opt ? 'text-white/80' : 'text-indigo-400'}`}>{optPinyin}</span>}
+                   </div>
+                   <div 
+                     onClick={(e) => {
+                       e.stopPropagation();
+                       speakText(opt, quizMode === 'vi-zh' ? 'vi-VN' : undefined);
+                     }}
+                     className="p-1.5 text-neutral-300 hover:text-indigo-600 hover:bg-neutral-100 rounded-lg transition-colors"
+                     title="Nghe phát âm"
+                   >
+                     <Volume2 className="w-4 h-4" />
                    </div>
                 </div>
               </button>
@@ -338,7 +343,6 @@ interface GameTabProps {
 }
 
 interface WordCardProps {
-  key?: string;
   word: string;
   pinyin: string;
   hanViet: string;
@@ -372,29 +376,40 @@ const WordCard = ({
       <div className="flex items-start justify-between gap-4">
         <button 
           onClick={() => onExplore(word)}
-          className="flex-1 flex items-center gap-4 text-left"
+          className="flex-1 flex items-center gap-4 text-left cursor-pointer"
         >
-          <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl font-bold transition-colors ${inNotebook ? 'bg-emerald-50 text-emerald-600' : 'bg-indigo-50 text-indigo-600'}`}>
+          <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl font-bold transition-colors shrink-0 ${inNotebook ? 'bg-emerald-50 text-emerald-600' : 'bg-indigo-50 text-indigo-600'}`}>
             {word}
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-0.5">
               <span className="text-sm font-bold text-neutral-800 italic">{pinyin}</span>
-              <span className="text-[11px] font-bold text-emerald-600 uppercase">({hanViet})</span>
+              {hanViet && <span className="text-[11px] font-bold text-emerald-600 uppercase">({hanViet})</span>}
             </div>
             <p className="text-sm text-neutral-600 font-medium line-clamp-1">{meaning}</p>
             {reason && <p className="text-[10px] text-emerald-500 font-bold mt-1 bg-emerald-50 px-1.5 py-0.5 rounded inline-block uppercase">{reason}</p>}
           </div>
         </button>
         
-        <div className="flex items-center gap-2 pt-1">
+        <div className="flex items-center gap-1 pt-1 shrink-0">
+          <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              ttsService.speak(word, 'vi-VN');
+            }}
+            className="p-2 text-neutral-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+            title="Nghe phát âm tiếng Việt"
+          >
+            <Volume2 className="w-5 h-5" />
+          </button>
+
           {inNotebook ? (
             <button 
               onClick={(e) => {
                 e.stopPropagation();
                 onToggleMastery?.(word);
               }}
-              className={`p-2 rounded-lg transition-colors ${isMastered ? 'text-emerald-500 bg-emerald-50' : 'text-neutral-300 hover:text-emerald-500 hover:bg-emerald-50'}`}
+              className={`p-2 rounded-lg transition-colors cursor-pointer ${isMastered ? 'text-emerald-500 bg-emerald-50' : 'text-neutral-300 hover:text-emerald-500 hover:bg-emerald-50'}`}
               title={isMastered ? t.gameInNotebook : t.gameMarkMasteredTooltip}
             >
               <CheckCircle2 className={`w-5 h-5 ${isMastered ? 'fill-current' : ''}`} />
@@ -405,7 +420,7 @@ const WordCard = ({
                 e.stopPropagation();
                 onAddVocab?.(word);
               }}
-              className="p-2 text-neutral-300 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+              className="p-2 text-neutral-300 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
               title={t.gameAddToNotebookTooltip}
             >
               <BookOpen className="w-5 h-5" />
@@ -434,9 +449,9 @@ export default function GameTab({
   const [currentWord, setCurrentWord] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<GameData | null>(null);
-  const [history, setHistory] = useState<string[]>([]);
   const [orderMode, setOrderMode] = useState<'random' | 'sequential'>('random');
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [isPlayingFullSequence, setIsPlayingFullSequence] = useState(false);
 
   const filteredVocab = useMemo(() => {
     let list = [...vocabList];
@@ -472,45 +487,50 @@ export default function GameTab({
     return list.filter(v => v.wordType !== "Mẫu câu" && v.chinese.length < 15);
   }, [vocabList, searchQuery, filterStatus, sortOrder, selectedWordTypes, selectedTopics]);
 
-  const speakSequence = async (elements: { text: string, lang: 'zh-CN' | 'vi-VN' | 'en-US' }[]) => {
-    await ttsService.speakSequence(elements, 250);
+  const playExploreSequence = async () => {
+    if (!data || !currentWord) return;
+
+    setIsPlayingFullSequence(true);
+    const helperLang = language === 'zh' ? 'zh-CN' : language === 'en' ? 'en-US' : 'vi-VN';
+    const items: { text: string, lang?: "vi-VN" | "zh-CN" | "en-US" }[] = [
+      { text: currentWord, lang: 'vi-VN' }
+    ];
+    
+    data.characterAnalysis.forEach(char => {
+      items.push({ text: `${t.gameCharAnalysisPrefix} ${char.char}`, lang: helperLang });
+      items.push({ text: char.char, lang: 'vi-VN' });
+      
+      const notebookWords = vocabList
+        .filter(v => v.chinese.includes(char.char) && v.chinese !== currentWord && v.wordType !== "Mẫu câu" && v.chinese.length < 15)
+        .map(v => v.chinese);
+      
+      notebookWords.forEach(w => items.push({ text: w, lang: 'vi-VN' }));
+      char.examples.forEach(ex => items.push({ text: ex.chinese, lang: 'vi-VN' }));
+    });
+
+    if (data.related.length > 0) {
+      items.push({ text: t.gameRelatedExpansion, lang: helperLang });
+      data.related.forEach(rel => items.push({ text: rel.chinese, lang: 'vi-VN' }));
+    }
+
+    if (data.antonyms.length > 0) {
+      items.push({ text: t.gameAntonyms, lang: helperLang });
+      data.antonyms.forEach(ant => items.push({ text: ant.chinese, lang: 'vi-VN' }));
+    }
+
+    await ttsService.speakSequence(items, 300);
+    setIsPlayingFullSequence(false);
   };
 
-  useEffect(() => {
-    if (data && !loading) {
-      const helperLang = language === 'zh' ? 'zh-CN' : language === 'en' ? 'en-US' : 'vi-VN';
-      const items: { text: string, lang: 'zh-CN' | 'vi-VN' | 'en-US' }[] = [
-        { text: currentWord, lang: 'vi-VN' }
-      ];
-      
-      data.characterAnalysis.forEach(char => {
-        items.push({ text: `${t.gameCharAnalysisPrefix} ${char.char}`, lang: helperLang });
-        items.push({ text: char.char, lang: 'vi-VN' });
-        
-        const notebookWords = vocabList
-          .filter(v => v.chinese.includes(char.char) && v.chinese !== currentWord && v.wordType !== "Mẫu câu" && v.chinese.length < 15)
-          .map(v => v.chinese);
-        
-        notebookWords.forEach(w => items.push({ text: w, lang: 'vi-VN' }));
-        char.examples.forEach(ex => items.push({ text: ex.chinese, lang: 'vi-VN' }));
-      });
-
-      if (data.related.length > 0) {
-        items.push({ text: t.gameRelatedExpansion, lang: helperLang });
-        data.related.forEach(rel => items.push({ text: rel.chinese, lang: 'vi-VN' }));
-      }
-
-      if (data.antonyms.length > 0) {
-        items.push({ text: t.gameAntonyms, lang: helperLang });
-        data.antonyms.forEach(ant => items.push({ text: ant.chinese, lang: 'vi-VN' }));
-      }
-
-      speakSequence(items);
-    }
-  }, [data, loading, currentWord]);
+  const stopExploreSequence = () => {
+    ttsService.stop();
+    setIsPlayingFullSequence(false);
+  };
 
   const exploreWord = async (word: string) => {
     if (!word) return;
+    ttsService.stop();
+    setIsPlayingFullSequence(false);
     setLoading(true);
     setCurrentWord(word);
     setSearchTerm("");
@@ -519,9 +539,11 @@ export default function GameTab({
       const existingWords = vocabList.map(v => v.chinese);
       const result = await geminiService.getRelatedWords(word, existingWords);
       setData(result);
-      if (!history.includes(word)) {
-        setHistory(prev => [word, ...prev].slice(0, 5));
-      }
+      
+      // Immediately speak the word when explored
+      setTimeout(() => {
+        ttsService.speak(word, 'vi-VN');
+      }, 150);
     } catch (error) {
       onError(error);
     } finally {
@@ -547,14 +569,20 @@ export default function GameTab({
       {/* Mode Switcher */}
       <div className={`bg-neutral-100 p-1 rounded-2xl flex w-full max-w-sm mx-auto shadow-inner shrink-0 ${view === 'quiz' ? 'mt-4 mx-4 w-[calc(100%-2rem)]' : ''}`}>
         <button 
-          onClick={() => setView('explore')}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all ${view === 'explore' ? 'bg-white shadow text-emerald-600' : 'text-neutral-500'}`}
+          onClick={() => {
+            ttsService.stop();
+            setView('explore');
+          }}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all cursor-pointer ${view === 'explore' ? 'bg-white shadow text-emerald-600' : 'text-neutral-500'}`}
         >
           <Sparkles className="w-4 h-4" /> {t.gameExploreTab}
         </button>
         <button 
-          onClick={() => setView('quiz')}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all ${view === 'quiz' ? 'bg-white shadow text-indigo-600' : 'text-neutral-500'}`}
+          onClick={() => {
+            ttsService.stop();
+            setView('quiz');
+          }}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all cursor-pointer ${view === 'quiz' ? 'bg-white shadow text-indigo-600' : 'text-neutral-500'}`}
         >
           <Trophy className="w-4 h-4" /> {t.gameQuizTab}
         </button>
@@ -570,189 +598,232 @@ export default function GameTab({
       ) : (
         <>
           {/* Search & Controls */}
-      <div className="space-y-4">
-        <div className="relative group">
-          <input 
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && exploreWord(searchTerm)}
-            placeholder={t.gameSearchPlaceholder}
-            className="w-full pl-12 pr-12 py-3 bg-white border-2 border-neutral-100 rounded-2xl shadow-sm focus:border-emerald-500 focus:ring-0 transition-all text-base"
-          />
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400 group-focus-within:text-emerald-500" />
-          <button 
-            onClick={handleNext}
-            className="absolute right-4 top-1/2 -translate-y-1/2 p-2 hover:bg-neutral-100 rounded-full text-emerald-600 transition-colors"
-          >
-            <ArrowRight className="w-6 h-6" />
-          </button>
-        </div>
-
-        <div className="flex bg-neutral-100 p-1 rounded-xl w-fit">
-          <button 
-            onClick={() => setOrderMode('random')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${orderMode === 'random' ? 'bg-white shadow text-emerald-600' : 'text-neutral-500 hover:text-neutral-700'}`}
-          >
-            {t.gameRandomOrder}
-          </button>
-          <button 
-            onClick={() => setOrderMode('sequential')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${orderMode === 'sequential' ? 'bg-white shadow text-emerald-600' : 'text-neutral-500 hover:text-neutral-700'}`}
-          >
-            {t.gameSequentialOrder}
-          </button>
-        </div>
-      </div>
-
-      <AnimatePresence mode="wait">
-        {loading ? (
-          <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center justify-center py-20 space-y-4 text-neutral-500">
-            <Loader2 className="w-10 h-10 animate-spin text-emerald-600" />
-            <p className="font-medium animate-pulse">{t.gameExploring}</p>
-          </motion.div>
-        ) : data ? (
-          <motion.div key="results" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
-            {/* Root Word */}
-            <div className="bg-white p-8 rounded-[2rem] shadow-xl border border-neutral-50 text-center relative overflow-hidden">
-               <div className="absolute top-4 right-4 group">
-                  {vocabList.find(v => v.chinese === currentWord) ? (
-                    <button 
-                      onClick={() => onToggleMastery?.(currentWord)}
-                      className={`p-3 rounded-2xl transition-all ${vocabList.find(v => v.chinese === currentWord)?.isMastered ? 'bg-emerald-500 text-white shadow-lg' : 'bg-neutral-100 text-neutral-300 hover:text-emerald-500'}`}
-                    >
-                      <CheckCircle2 className="w-6 h-6" />
-                    </button>
-                  ) : (
-                    <button onClick={() => onAddVocab?.(currentWord)} className="p-3 bg-neutral-50 text-neutral-400 rounded-2xl hover:text-emerald-600"><BookOpen className="w-6 h-6" /></button>
-                  )}
-               </div>
-               <h2 className="text-6xl font-bold text-neutral-800 mb-2">{currentWord}</h2>
-               <div className="space-y-1">
-                 <p className="text-xl text-emerald-600 font-bold uppercase tracking-widest">{vocabList.find(v => v.chinese === currentWord)?.hanViet || "HÁN VIỆT"}</p>
-                 <p className="text-lg text-neutral-500 italic">{vocabList.find(v => v.chinese === currentWord)?.pinyin || ""}</p>
-                 <p className="text-lg text-neutral-400 font-medium">{vocabList.find(v => v.chinese === currentWord)?.meaning || ""}</p>
-               </div>
-            </div>
-
-            {/* Analysis Sections */}
-            {data.characterAnalysis.map((char, charIdx) => (
-              <div key={charIdx} className="space-y-4">
-                <div className="flex items-center gap-3 px-2">
-                  <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-xl font-bold text-indigo-600 border border-indigo-100">{char.char}</div>
-                  <div className="flex-1">
-                    <p className="font-bold text-neutral-800 text-lg uppercase tracking-tight">{char.meaning}</p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-3 pl-4">
-                  {/* Notebook Words for this char */}
-                  {vocabList.filter(v => v.chinese.includes(char.char) && v.chinese !== currentWord && v.wordType !== "Mẫu câu" && v.chinese.length < 7).map((v, i) => (
-                    <WordCard 
-                      key={`nb-${charIdx}-${i}`} 
-                      word={v.chinese} 
-                      pinyin={v.pinyin} 
-                      hanViet={v.hanViet} 
-                      meaning={v.meaning} 
-                      vocabList={vocabList}
-                      onAddVocab={onAddVocab}
-                      onToggleMastery={onToggleMastery}
-                      onExplore={exploreWord}
-                    />
-                  ))}
-                  {/* AI Examples for this char */}
-                  {char.examples.map((ex, i) => (
-                    <WordCard 
-                      key={`ex-${charIdx}-${i}`} 
-                      word={ex.chinese} 
-                      pinyin={ex.pinyin} 
-                      hanViet={ex.hanViet} 
-                      meaning={ex.meaning} 
-                      isAI 
-                      vocabList={vocabList}
-                      onAddVocab={onAddVocab}
-                      onToggleMastery={onToggleMastery}
-                      onExplore={exploreWord}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))}
-
-            {/* Related Words Section */}
-            <div className="space-y-4 pt-4">
-               <div className="flex items-center gap-2 px-2">
-                  <LinkIcon className="w-5 h-5 text-emerald-500" />
-                  <h3 className="font-bold text-neutral-800">{t.gameRelatedExpansion}</h3>
-               </div>
-               <div className="grid grid-cols-1 gap-3">
-                 {data.related.map((rel, i) => (
-                   <WordCard 
-                     key={`rel-${i}`} 
-                     word={rel.chinese} 
-                     pinyin={rel.pinyin} 
-                     hanViet={rel.hanViet} 
-                     meaning={rel.meaning} 
-                     reason={rel.reason} 
-                     isAI 
-                     vocabList={vocabList}
-                     onAddVocab={onAddVocab}
-                     onToggleMastery={onToggleMastery}
-                     onExplore={exploreWord}
-                   />
-                 ))}
-               </div>
-            </div>
-
-            {/* Antonyms Section */}
-            {data.antonyms.length > 0 && (
-              <div className="space-y-4 pt-4">
-                <div className="flex items-center gap-2 px-2">
-                  <ArrowRightLeft className="w-5 h-5 text-rose-500" />
-                  <h3 className="font-bold text-neutral-800">{t.gameAntonyms}</h3>
-                </div>
-                <div className="grid grid-cols-1 gap-3">
-                   {data.antonyms.map((ant, i) => (
-                     <WordCard 
-                       key={`ant-${i}`} 
-                       word={ant.chinese} 
-                       pinyin={ant.pinyin} 
-                       hanViet={ant.hanViet} 
-                       meaning={ant.meaning} 
-                       isAI 
-                       vocabList={vocabList}
-                       onAddVocab={onAddVocab}
-                       onToggleMastery={onToggleMastery}
-                       onExplore={exploreWord}
-                     />
-                   ))}
-                </div>
-              </div>
-            )}
-
-            <div className="flex justify-center pt-6">
-              <button onClick={handleNext} className="flex items-center gap-2 px-8 py-4 bg-emerald-600 text-white rounded-2xl font-bold shadow-lg hover:bg-emerald-700 transition-all">
-                {t.gameNext} <ArrowRight className="w-5 h-5" />
+          <div className="space-y-4">
+            <div className="relative group">
+              <input 
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && exploreWord(searchTerm)}
+                placeholder={t.gameSearchPlaceholder}
+                className="w-full pl-12 pr-12 py-3 bg-white border-2 border-neutral-100 rounded-2xl shadow-sm focus:border-emerald-500 focus:ring-0 transition-all text-base"
+              />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400 group-focus-within:text-emerald-500" />
+              <button 
+                onClick={() => exploreWord(searchTerm)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 p-2 hover:bg-neutral-100 rounded-full text-emerald-600 transition-colors cursor-pointer"
+              >
+                <ArrowRight className="w-6 h-6" />
               </button>
             </div>
-          </motion.div>
-        ) : (
-          <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center justify-center py-20 text-center space-y-6">
-            <div className="w-20 h-20 bg-emerald-50 rounded-3xl flex items-center justify-center">
-              <Sparkles className="w-10 h-10 text-emerald-400" />
+
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex bg-neutral-100 p-1 rounded-xl w-fit">
+                <button 
+                  onClick={() => setOrderMode('random')}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${orderMode === 'random' ? 'bg-white shadow text-emerald-600' : 'text-neutral-500 hover:text-neutral-700'}`}
+                >
+                  {t.gameRandomOrder}
+                </button>
+                <button 
+                  onClick={() => setOrderMode('sequential')}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${orderMode === 'sequential' ? 'bg-white shadow text-emerald-600' : 'text-neutral-500 hover:text-neutral-700'}`}
+                >
+                  {t.gameSequentialOrder}
+                </button>
+              </div>
+
+              {data && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={isPlayingFullSequence ? stopExploreSequence : playExploreSequence}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer ${
+                      isPlayingFullSequence ? 'bg-rose-500 text-white animate-pulse' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+                    }`}
+                    title={isPlayingFullSequence ? "Dừng đọc" : "Đọc toàn bộ bài phân tích"}
+                  >
+                    {isPlayingFullSequence ? <Pause className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                    {isPlayingFullSequence ? "Dừng đọc" : "Đọc toàn bộ"}
+                  </button>
+                </div>
+              )}
             </div>
-            <div className="space-y-2">
-              <h4 className="text-2xl font-bold text-neutral-800">{t.gameEmptyTitle}</h4>
-              <p className="text-neutral-500 max-w-xs">{t.gameEmptyDesc}</p>
-            </div>
-            <button onClick={handleNext} className="px-10 py-4 bg-emerald-600 text-white rounded-2xl font-bold shadow-lg hover:bg-emerald-700 transition-all flex items-center gap-2">
-              <Play className="w-5 h-5 fill-current" /> {t.gameStartExplore}
-            </button>
-          </motion.div>
+          </div>
+
+          <AnimatePresence mode="wait">
+            {loading ? (
+              <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center justify-center py-20 space-y-4 text-neutral-500">
+                <Loader2 className="w-10 h-10 animate-spin text-emerald-600" />
+                <p className="font-medium animate-pulse">{t.gameExploring}</p>
+              </motion.div>
+            ) : data ? (
+              <motion.div key="results" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+                {/* Root Word Card */}
+                <div className="bg-white p-8 rounded-[2rem] shadow-xl border border-neutral-50 text-center relative overflow-hidden">
+                   <div className="absolute top-4 right-4 flex items-center gap-2">
+                      <button 
+                        onClick={() => ttsService.speak(currentWord, 'vi-VN')}
+                        className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl hover:bg-emerald-100 transition-colors shadow-sm cursor-pointer"
+                        title="Nghe phát âm tiếng Việt"
+                      >
+                        <Volume2 className="w-6 h-6" />
+                      </button>
+
+                      {vocabList.find(v => v.chinese === currentWord) ? (
+                        <button 
+                          onClick={() => onToggleMastery?.(currentWord)}
+                          className={`p-3 rounded-2xl transition-all cursor-pointer ${vocabList.find(v => v.chinese === currentWord)?.isMastered ? 'bg-emerald-500 text-white shadow-lg' : 'bg-neutral-100 text-neutral-300 hover:text-emerald-500'}`}
+                          title={t.gameMarkMasteredTooltip}
+                        >
+                          <CheckCircle2 className="w-6 h-6" />
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={() => onAddVocab?.(currentWord)} 
+                          className="p-3 bg-neutral-50 text-neutral-400 rounded-2xl hover:text-emerald-600 cursor-pointer"
+                          title={t.gameAddToNotebookTooltip}
+                        >
+                          <BookOpen className="w-6 h-6" />
+                        </button>
+                      )}
+                   </div>
+                   <h2 className="text-5xl sm:text-6xl font-bold text-neutral-800 mb-2">{currentWord}</h2>
+                   <div className="space-y-1">
+                     <p className="text-xl text-emerald-600 font-bold uppercase tracking-widest">{vocabList.find(v => v.chinese === currentWord)?.hanViet || "HÁN VIỆT"}</p>
+                     <p className="text-lg text-neutral-500 italic">{vocabList.find(v => v.chinese === currentWord)?.pinyin || ""}</p>
+                     <p className="text-lg text-neutral-400 font-medium">{vocabList.find(v => v.chinese === currentWord)?.meaning || ""}</p>
+                   </div>
+                </div>
+
+                {/* Character Analysis Sections */}
+                {data.characterAnalysis.map((char, charIdx) => (
+                  <div key={charIdx} className="space-y-4">
+                    <div className="flex items-center justify-between px-2">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-xl font-bold text-indigo-600 border border-indigo-100">{char.char}</div>
+                        <div>
+                          <p className="font-bold text-neutral-800 text-lg uppercase tracking-tight">{char.meaning}</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => ttsService.speak(char.char, 'vi-VN')}
+                        className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                        title="Nghe phát âm tiếng này"
+                      >
+                        <Volume2 className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 pl-4">
+                      {/* Notebook Words for this char */}
+                      {vocabList.filter(v => v.chinese.includes(char.char) && v.chinese !== currentWord && v.wordType !== "Mẫu câu" && v.chinese.length < 7).map((v, i) => (
+                        <WordCard 
+                          key={`nb-${charIdx}-${i}`} 
+                          word={v.chinese} 
+                          pinyin={v.pinyin} 
+                          hanViet={v.hanViet} 
+                          meaning={v.meaning} 
+                          vocabList={vocabList}
+                          onAddVocab={onAddVocab}
+                          onToggleMastery={onToggleMastery}
+                          onExplore={exploreWord}
+                        />
+                      ))}
+                      {/* AI Examples for this char */}
+                      {char.examples.map((ex, i) => (
+                        <WordCard 
+                          key={`ex-${charIdx}-${i}`} 
+                          word={ex.chinese} 
+                          pinyin={ex.pinyin} 
+                          hanViet={ex.hanViet} 
+                          meaning={ex.meaning} 
+                          isAI 
+                          vocabList={vocabList}
+                          onAddVocab={onAddVocab}
+                          onToggleMastery={onToggleMastery}
+                          onExplore={exploreWord}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+
+                {/* Related Words Section */}
+                {data.related.length > 0 && (
+                  <div className="space-y-4 pt-4">
+                     <div className="flex items-center gap-2 px-2">
+                        <LinkIcon className="w-5 h-5 text-emerald-500" />
+                        <h3 className="font-bold text-neutral-800">{t.gameRelatedExpansion}</h3>
+                     </div>
+                     <div className="grid grid-cols-1 gap-3">
+                       {data.related.map((rel, i) => (
+                         <WordCard 
+                           key={`rel-${i}`} 
+                           word={rel.chinese} 
+                           pinyin={rel.pinyin} 
+                           hanViet={rel.hanViet} 
+                           meaning={rel.meaning} 
+                           reason={rel.reason} 
+                           isAI 
+                           vocabList={vocabList}
+                           onAddVocab={onAddVocab}
+                           onToggleMastery={onToggleMastery}
+                           onExplore={exploreWord}
+                         />
+                       ))}
+                     </div>
+                  </div>
+                )}
+
+                {/* Antonyms Section */}
+                {data.antonyms.length > 0 && (
+                  <div className="space-y-4 pt-4">
+                    <div className="flex items-center gap-2 px-2">
+                      <ArrowRightLeft className="w-5 h-5 text-rose-500" />
+                      <h3 className="font-bold text-neutral-800">{t.gameAntonyms}</h3>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3">
+                       {data.antonyms.map((ant, i) => (
+                         <WordCard 
+                           key={`ant-${i}`} 
+                           word={ant.chinese} 
+                           pinyin={ant.pinyin} 
+                           hanViet={ant.hanViet} 
+                           meaning={ant.meaning} 
+                           isAI 
+                           vocabList={vocabList}
+                           onAddVocab={onAddVocab}
+                           onToggleMastery={onToggleMastery}
+                           onExplore={exploreWord}
+                         />
+                       ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-center pt-6">
+                  <button onClick={handleNext} className="flex items-center gap-2 px-8 py-4 bg-emerald-600 text-white rounded-2xl font-bold shadow-lg hover:bg-emerald-700 transition-all cursor-pointer">
+                    {t.gameNext} <ArrowRight className="w-5 h-5" />
+                  </button>
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center justify-center py-20 text-center space-y-6">
+                <div className="w-20 h-20 bg-emerald-50 rounded-3xl flex items-center justify-center">
+                  <Sparkles className="w-10 h-10 text-emerald-400" />
+                </div>
+                <div className="space-y-2">
+                  <h4 className="text-2xl font-bold text-neutral-800">{t.gameEmptyTitle}</h4>
+                  <p className="text-neutral-500 max-w-xs">{t.gameEmptyDesc}</p>
+                </div>
+                <button onClick={handleNext} className="px-10 py-4 bg-emerald-600 text-white rounded-2xl font-bold shadow-lg hover:bg-emerald-700 transition-all flex items-center gap-2 cursor-pointer">
+                  <Play className="w-5 h-5 fill-current" /> {t.gameStartExplore}
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+         </>
         )}
-      </AnimatePresence>
-     </>
-    )}
     </div>
   );
 }
