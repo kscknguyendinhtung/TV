@@ -85,7 +85,7 @@ export default function ReadingTab({ sentences, setSentences, vocabList, onUploa
   }, [sentences, vocabList]);
 
   const speak = (text: string) => {
-    ttsService.speak(text, "vi-VN", playbackSpeed);
+    ttsService.speak(text, "zh-CN", playbackSpeed);
   };
 
   const toggleMastered = (index: number) => {

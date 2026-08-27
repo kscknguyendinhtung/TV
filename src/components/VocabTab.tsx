@@ -638,10 +638,10 @@ function TableView({ list, onToggleMastered, onDelete, onEdit, onSelect, emptyMe
             <button 
               onClick={(e) => {
                 e.stopPropagation();
-                ttsService.speak(item.chinese, "vi-VN");
+                ttsService.speak(item.chinese, "zh-CN");
               }} 
               className="p-2 text-neutral-400 hover:text-emerald-600 rounded-lg hover:bg-emerald-50 transition-colors"
-              title="Phát âm"
+              title="Phát âm tiếng Trung"
             >
               <Volume2 className="w-4 h-4" />
             </button>
@@ -717,16 +717,16 @@ function FlashcardView({ list, onToggleMastered, onEdit, onDelete, initialIndex 
       if (isFlipped) {
         // Speak the back side
         if (frontSide === "chinese") {
-          speak(currentItem.meaning);
+          speak(currentItem.meaning, "vi-VN");
         } else {
-          speak(currentItem.chinese, "vi-VN");
+          speak(currentItem.chinese, "zh-CN");
         }
       } else {
         // Speak the front side
         if (frontSide === "chinese") {
-          speak(currentItem.chinese, "vi-VN");
+          speak(currentItem.chinese, "zh-CN");
         } else {
-          speak(currentItem.meaning);
+          speak(currentItem.meaning, "vi-VN");
         }
       }
     }
@@ -839,9 +839,9 @@ function FlashcardView({ list, onToggleMastered, onEdit, onDelete, initialIndex 
               onClick={(e) => { 
                 e.stopPropagation(); 
                 if (frontSide === "chinese") {
-                  speak(currentItem.chinese, "vi-VN");
+                  speak(currentItem.chinese, "zh-CN");
                 } else {
-                  speak(currentItem.meaning);
+                  speak(currentItem.meaning, "vi-VN");
                 }
               }}
               className="absolute top-6 right-6 p-2 bg-neutral-50 rounded-full text-neutral-400 hover:text-emerald-600 cursor-pointer shadow-sm"
@@ -872,9 +872,9 @@ function FlashcardView({ list, onToggleMastered, onEdit, onDelete, initialIndex 
               onClick={(e) => { 
                 e.stopPropagation(); 
                 if (frontSide === "chinese") {
-                  speak(currentItem.meaning);
+                  speak(currentItem.meaning, "vi-VN");
                 } else {
-                  speak(currentItem.chinese, "vi-VN");
+                  speak(currentItem.chinese, "zh-CN");
                 }
               }}
               className="absolute top-6 left-6 p-2 bg-white/10 rounded-full text-white/70 hover:text-white cursor-pointer shadow-sm"
