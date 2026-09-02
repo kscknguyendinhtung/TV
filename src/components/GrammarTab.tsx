@@ -34,7 +34,7 @@ export default function GrammarTab({ points, setPoints, onUpload, isSyncing }: P
   };
 
   const speak = (text: string) => {
-    ttsService.speak(text, "zh-CN");
+    ttsService.speak(text, "vi-VN");
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

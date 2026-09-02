@@ -56,10 +56,8 @@ const MillionaireQuiz: React.FC<MillionaireQuizProps> = ({ vocabList, filteredVo
   const speakQuestionPrompt = (q: Vocabulary, mode: QuizMode) => {
     ttsService.stop();
     if (mode === 'zh-vi') {
-      // Question is Chinese word (e.g., '学习')
-      speakText(q.chinese, 'zh-CN');
+      speakText(q.chinese, 'vi-VN');
     } else {
-      // Question is Vietnamese Meaning (e.g., 'Học tập')
       speakText(q.meaning, 'vi-VN');
     }
   };
@@ -67,11 +65,9 @@ const MillionaireQuiz: React.FC<MillionaireQuizProps> = ({ vocabList, filteredVo
   const speakAnswerResult = (q: Vocabulary, mode: QuizMode) => {
     ttsService.stop();
     if (mode === 'zh-vi') {
-      // Correct answer is Meaning (Vietnamese)
       speakText(q.meaning, 'vi-VN');
     } else {
-      // Correct answer is Chinese word
-      speakText(q.chinese, 'zh-CN');
+      speakText(q.chinese, 'vi-VN');
     }
   };
 
@@ -312,7 +308,7 @@ const MillionaireQuiz: React.FC<MillionaireQuizProps> = ({ vocabList, filteredVo
                    <div 
                      onClick={(e) => {
                        e.stopPropagation();
-                       speakText(opt, quizMode === 'vi-zh' ? 'zh-CN' : 'vi-VN');
+                       speakText(opt, 'vi-VN');
                      }}
                      className="p-1.5 text-neutral-300 hover:text-indigo-600 hover:bg-neutral-100 rounded-lg transition-colors"
                      title="Nghe phát âm"
@@ -396,10 +392,10 @@ const WordCard = ({
           <button 
             onClick={(e) => {
               e.stopPropagation();
-              ttsService.speak(word, 'zh-CN');
+              ttsService.speak(word, 'vi-VN');
             }}
             className="p-2 text-neutral-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
-            title="Nghe phát âm tiếng Trung"
+            title="Nghe phát âm tiếng Việt"
           >
             <Volume2 className="w-5 h-5" />
           </button>
@@ -494,29 +490,29 @@ export default function GameTab({
     setIsPlayingFullSequence(true);
     const helperLang = language === 'zh' ? 'zh-CN' : language === 'en' ? 'en-US' : 'vi-VN';
     const items: { text: string, lang?: "vi-VN" | "zh-CN" | "en-US" }[] = [
-      { text: currentWord, lang: 'zh-CN' }
+      { text: currentWord, lang: 'vi-VN' }
     ];
     
     data.characterAnalysis.forEach(char => {
       items.push({ text: `${t.gameCharAnalysisPrefix} ${char.char}`, lang: helperLang });
-      items.push({ text: char.char, lang: 'zh-CN' });
+      items.push({ text: char.char, lang: 'vi-VN' });
       
       const notebookWords = vocabList
         .filter(v => v.chinese.includes(char.char) && v.chinese !== currentWord && v.wordType !== "Mẫu câu" && v.chinese.length < 15)
         .map(v => v.chinese);
       
-      notebookWords.forEach(w => items.push({ text: w, lang: 'zh-CN' }));
-      char.examples.forEach(ex => items.push({ text: ex.chinese, lang: 'zh-CN' }));
+      notebookWords.forEach(w => items.push({ text: w, lang: 'vi-VN' }));
+      char.examples.forEach(ex => items.push({ text: ex.chinese, lang: 'vi-VN' }));
     });
 
     if (data.related.length > 0) {
       items.push({ text: t.gameRelatedExpansion, lang: helperLang });
-      data.related.forEach(rel => items.push({ text: rel.chinese, lang: 'zh-CN' }));
+      data.related.forEach(rel => items.push({ text: rel.chinese, lang: 'vi-VN' }));
     }
 
     if (data.antonyms.length > 0) {
       items.push({ text: t.gameAntonyms, lang: helperLang });
-      data.antonyms.forEach(ant => items.push({ text: ant.chinese, lang: 'zh-CN' }));
+      data.antonyms.forEach(ant => items.push({ text: ant.chinese, lang: 'vi-VN' }));
     }
 
     await ttsService.speakSequence(items, 300);
@@ -543,7 +539,7 @@ export default function GameTab({
       
       // Immediately speak the word when explored
       setTimeout(() => {
-        ttsService.speak(word, 'zh-CN');
+        ttsService.speak(word, 'vi-VN');
       }, 150);
     } catch (error) {
       onError(error);
@@ -663,9 +659,9 @@ export default function GameTab({
                 <div className="bg-white p-8 rounded-[2rem] shadow-xl border border-neutral-50 text-center relative overflow-hidden">
                    <div className="absolute top-4 right-4 flex items-center gap-2">
                       <button 
-                        onClick={() => ttsService.speak(currentWord, 'zh-CN')}
+                        onClick={() => ttsService.speak(currentWord, 'vi-VN')}
                         className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl hover:bg-emerald-100 transition-colors shadow-sm cursor-pointer"
-                        title="Nghe phát âm tiếng Trung"
+                        title="Nghe phát âm tiếng Việt"
                       >
                         <Volume2 className="w-6 h-6" />
                       </button>
@@ -707,7 +703,7 @@ export default function GameTab({
                         </div>
                       </div>
                       <button
-                        onClick={() => ttsService.speak(char.char, 'zh-CN')}
+                        onClick={() => ttsService.speak(char.char, 'vi-VN')}
                         className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
                         title="Nghe phát âm tiếng này"
                       >

@@ -32,6 +32,9 @@ export interface TranslationDictionary {
   ocrReadingImage: string;
   ocrReadDone: string;
   ocrSelectImage: string;
+  ocrTakePhoto: string;
+  ocrUploadPhoto: string;
+  ocrDragDrop: string;
   ocrSupportFormats: string;
   ocrAutoSplit: string;
   ocrSaveHistory: string;
@@ -227,6 +230,9 @@ export const translations: Record<AppLanguage, TranslationDictionary> = {
     ocrReadingImage: "Scanning image...",
     ocrReadDone: "Scanning complete!",
     ocrSelectImage: "Select Image / Camera",
+    ocrTakePhoto: "Take Photo (Camera)",
+    ocrUploadPhoto: "Choose from Photos / Files",
+    ocrDragDrop: "Drag & drop image here or browse files",
     ocrSupportFormats: "Supports JPG, PNG, WEBP",
     ocrAutoSplit: "Auto sentence & compound word segmentation",
     ocrSaveHistory: "Save history to Google Sheet",
@@ -421,6 +427,9 @@ export const translations: Record<AppLanguage, TranslationDictionary> = {
     ocrReadingImage: "Đang đọc tài liệu tiếng Việt...",
     ocrReadDone: "Đã phân tích xong!",
     ocrSelectImage: "Chọn ảnh / Máy ảnh",
+    ocrTakePhoto: "Chụp ảnh (Máy ảnh)",
+    ocrUploadPhoto: "Chọn ảnh từ Thư viện",
+    ocrDragDrop: "Kéo thả ảnh vào đây hoặc chọn từ thiết bị",
     ocrSupportFormats: "Hỗ trợ JPG, PNG, WEBP",
     ocrAutoSplit: "Tự động tách câu & trích xuất từ ghép",
     ocrSaveHistory: "Lưu lịch sử vào Google Sheet",
@@ -615,6 +624,9 @@ export const translations: Record<AppLanguage, TranslationDictionary> = {
     ocrReadingImage: "正在读取越南语教材/文段...",
     ocrReadDone: "扫描识别完成！",
     ocrSelectImage: "选择图片 / 相机拍摄",
+    ocrTakePhoto: "相机拍照",
+    ocrUploadPhoto: "相册 / 文件选择",
+    ocrDragDrop: "拖拽图片至此处或浏览本地文件",
     ocrSupportFormats: "支持 JPG, PNG, WEBP",
     ocrAutoSplit: "自动断句分词与复合词提取",
     ocrSaveHistory: "自动记录到 Google 表格",

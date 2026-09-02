@@ -638,10 +638,10 @@ function TableView({ list, onToggleMastered, onDelete, onEdit, onSelect, emptyMe
             <button 
               onClick={(e) => {
                 e.stopPropagation();
-                ttsService.speak(item.chinese, "zh-CN");
+                ttsService.speak(item.chinese, "vi-VN");
               }} 
               className="p-2 text-neutral-400 hover:text-emerald-600 rounded-lg hover:bg-emerald-50 transition-colors"
-              title="Phát âm tiếng Trung"
+              title="Phát âm tiếng Việt"
             >
               <Volume2 className="w-4 h-4" />
             </button>
