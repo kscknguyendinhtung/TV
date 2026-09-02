@@ -74,9 +74,9 @@ export const cleanAndParseJSON = <T = any>(rawText?: string, fallback: any = {})
 
 const parseImageData = (base64Image: string): { data: string; mimeType: string } => {
   let mimeType = "image/jpeg";
-  let data = base64Image;
+  let data = base64Image || "";
 
-  if (base64Image.includes(",")) {
+  if (base64Image && base64Image.includes(",")) {
     const parts = base64Image.split(",");
     data = parts[1];
     const header = parts[0];
@@ -86,16 +86,59 @@ const parseImageData = (base64Image: string): { data: string; mimeType: string }
     }
   }
 
+  if (!data || data.trim() === "") {
+    const err = new Error("Dữ liệu hình ảnh không hợp lệ hoặc rỗng. Vui lòng chọn lại ảnh.");
+    (err as any).code = "INVALID_IMAGE_DATA";
+    (err as any).status = 400;
+    throw err;
+  }
+
   return { data, mimeType };
 };
 
+/**
+ * Execute generateContent with candidate models to guarantee high availability in production
+ */
+async function callGeminiModel(ai: any, contents: any, config?: any): Promise<any> {
+  const candidateModels = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-3.7-flash"];
+  let lastError: any = null;
+
+  for (const modelName of candidateModels) {
+    try {
+      return await ai.models.generateContent({
+        model: modelName,
+        contents,
+        ...(config ? { config } : {})
+      });
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`Gemini model ${modelName} error:`, err?.message || err);
+      // For auth or configuration errors, do not retry other models
+      if (
+        err?.status === 401 || 
+        err?.status === 403 || 
+        err?.code === "GEMINI_API_KEY_MISSING" ||
+        err?.message?.includes("API key not valid")
+      ) {
+        throw err;
+      }
+    }
+  }
+  throw lastError;
+}
+
 export async function handleGeminiAction(action: string, payload: any): Promise<any> {
   const ai = getAI();
-  const model = "gemini-3.7-flash";
 
   switch (action) {
     case "performOCR": {
-      const { base64Image } = payload;
+      const { base64Image } = payload || {};
+      if (!base64Image) {
+        const err = new Error("Thiếu dữ liệu ảnh để quét OCR.");
+        (err as any).code = "MISSING_IMAGE";
+        (err as any).status = 400;
+        throw err;
+      }
       const { data, mimeType } = parseImageData(base64Image);
 
       const prompt = `
@@ -151,9 +194,9 @@ export async function handleGeminiAction(action: string, payload: any): Promise<
         }
       `;
 
-      const response = await ai.models.generateContent({
-        model,
-        contents: [
+      const response = await callGeminiModel(
+        ai,
+        [
           {
             parts: [
               { inlineData: { data, mimeType } },
@@ -161,10 +204,10 @@ export async function handleGeminiAction(action: string, payload: any): Promise<
             ]
           }
         ],
-        config: {
+        {
           responseMimeType: "application/json"
         }
-      });
+      );
 
       const result = cleanAndParseJSON(response.text, { originalText: "", sentences: [], words: [] });
       if (result.words && Array.isArray(result.words)) {
@@ -224,12 +267,8 @@ export async function handleGeminiAction(action: string, payload: any): Promise<
         ]
       `;
 
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json"
-        }
+      const response = await callGeminiModel(ai, prompt, {
+        responseMimeType: "application/json"
       });
 
       const words = cleanAndParseJSON<any[]>(response.text, []);
@@ -255,12 +294,8 @@ export async function handleGeminiAction(action: string, payload: any): Promise<
         }
       `;
 
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json"
-        }
+      const response = await callGeminiModel(ai, prompt, {
+        responseMimeType: "application/json"
       });
 
       const data = cleanAndParseJSON(response.text, {});
@@ -287,19 +322,21 @@ export async function handleGeminiAction(action: string, payload: any): Promise<
         ]
       `;
 
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json"
-        }
+      const response = await callGeminiModel(ai, prompt, {
+        responseMimeType: "application/json"
       });
 
       return cleanAndParseJSON(response.text, []);
     }
 
     case "performGrammarOCR": {
-      const { base64Image } = payload;
+      const { base64Image } = payload || {};
+      if (!base64Image) {
+        const err = new Error("Thiếu dữ liệu ảnh ngữ pháp.");
+        (err as any).code = "MISSING_IMAGE";
+        (err as any).status = 400;
+        throw err;
+      }
       const { data, mimeType } = parseImageData(base64Image);
 
       const prompt = `
@@ -318,9 +355,9 @@ export async function handleGeminiAction(action: string, payload: any): Promise<
         ]
       `;
 
-      const response = await ai.models.generateContent({
-        model,
-        contents: [
+      const response = await callGeminiModel(
+        ai,
+        [
           {
             parts: [
               { inlineData: { data, mimeType } },
@@ -328,10 +365,10 @@ export async function handleGeminiAction(action: string, payload: any): Promise<
             ]
           }
         ],
-        config: {
+        {
           responseMimeType: "application/json"
         }
-      });
+      );
 
       return cleanAndParseJSON(response.text, []);
     }
@@ -356,12 +393,8 @@ export async function handleGeminiAction(action: string, payload: any): Promise<
         ]
       `;
 
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json"
-        }
+      const response = await callGeminiModel(ai, prompt, {
+        responseMimeType: "application/json"
       });
 
       return cleanAndParseJSON(response.text, []);
@@ -386,9 +419,9 @@ export async function handleGeminiAction(action: string, payload: any): Promise<
         }
       `;
 
-      const response = await ai.models.generateContent({
-        model,
-        contents: [
+      const response = await callGeminiModel(
+        ai,
+        [
           {
             parts: [
               { inlineData: { data: base64Audio, mimeType: "audio/webm" } },
@@ -396,10 +429,10 @@ export async function handleGeminiAction(action: string, payload: any): Promise<
             ]
           }
         ],
-        config: {
+        {
           responseMimeType: "application/json"
         }
-      });
+      );
 
       return cleanAndParseJSON(response.text, { score: 0, feedback: "Lỗi khi đánh giá giọng nói.", recognizedText: "" });
     }
@@ -437,12 +470,8 @@ export async function handleGeminiAction(action: string, payload: any): Promise<
         }
       `;
 
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json"
-        }
+      const response = await callGeminiModel(ai, prompt, {
+        responseMimeType: "application/json"
       });
 
       return cleanAndParseJSON(response.text, { related: [], antonyms: [], characterAnalysis: [] });
@@ -477,17 +506,17 @@ export async function handleGeminiAction(action: string, payload: any): Promise<
         }
       `;
 
-      const response = await ai.models.generateContent({
-        model,
-        contents: messages.map((m: any) => ({
+      const response = await callGeminiModel(
+        ai,
+        messages.map((m: any) => ({
           role: m.role,
           parts: [{ text: m.text }]
         })),
-        config: {
+        {
           systemInstruction: prompt,
           responseMimeType: "application/json"
         }
-      });
+      );
 
       return cleanAndParseJSON(response.text, {
         userMessage: { text: messages[messages.length - 1]?.text || "", meaning: "" },
@@ -522,10 +551,7 @@ export async function handleGeminiAction(action: string, payload: any): Promise<
       }
       try {
         const testAi = getAI();
-        const res = await testAi.models.generateContent({
-          model,
-          contents: "Trả lời đúng 1 chữ: OK",
-        });
+        const res = await callGeminiModel(testAi, "Trả lời đúng 1 chữ: OK");
         return { success: true, message: `Kết nối thành công! Phản hồi: ${res.text?.trim() || "OK"}` };
       } catch (e: any) {
         return { success: false, message: e?.message || "Không thể kết nối với Gemini API" };

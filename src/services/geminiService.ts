@@ -23,26 +23,56 @@ async function callGeminiApi<T>(action: string, payload: any = {}): Promise<T> {
     throw errorObj;
   }
 
+  let rawText = "";
+  try {
+    rawText = await response.text();
+  } catch (readErr: any) {
+    const errorObj = new Error(`Không thể đọc dữ liệu phản hồi từ máy chủ: ${readErr?.message || "Stream read error"}`);
+    (errorObj as any).code = "STREAM_READ_ERROR";
+    (errorObj as any).status = response.status;
+    throw errorObj;
+  }
+
+  let parsedData: any = null;
+  let isJson = false;
+  try {
+    parsedData = JSON.parse(rawText);
+    isJson = true;
+  } catch {
+    isJson = false;
+  }
+
   if (!response.ok) {
-    let errorDetail = "";
     let errorCode = `HTTP_${response.status}`;
-    try {
-      const errJson = await response.json();
-      errorDetail = errJson.error || errJson.message || "";
-      if (errJson.code) errorCode = errJson.code;
-    } catch {
-      errorDetail = await response.text();
+    let errorMessage = rawText;
+
+    if (isJson && parsedData) {
+      if (parsedData.code) errorCode = parsedData.code;
+      if (parsedData.error || parsedData.message) {
+        errorMessage = parsedData.error || parsedData.message;
+      }
     }
-    
-    const displayMsg = errorDetail || `Yêu cầu máy chủ thất bại với mã lỗi HTTP ${response.status}`;
-    const fullError = new Error(displayMsg);
+
+    if (!errorMessage || errorMessage.trim() === "") {
+      errorMessage = `Máy chủ trả về mã trạng thái lỗi HTTP ${response.status}`;
+    }
+
+    const fullError = new Error(errorMessage);
     (fullError as any).code = errorCode;
     (fullError as any).status = response.status;
-    (fullError as any).details = errorDetail;
+    (fullError as any).details = isJson ? JSON.stringify(parsedData) : rawText;
     throw fullError;
   }
 
-  return (await response.json()) as T;
+  if (!isJson) {
+    const errorObj = new Error("Máy chủ phản hồi nhưng dữ liệu không đúng định dạng JSON.");
+    (errorObj as any).code = "INVALID_JSON_RESPONSE";
+    (errorObj as any).status = response.status;
+    (errorObj as any).details = rawText;
+    throw errorObj;
+  }
+
+  return parsedData as T;
 }
 
 export const geminiService = {
