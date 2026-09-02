@@ -155,6 +155,40 @@ export const googleSheetService = {
       console.error("OCR Save error:", error);
       return false;
     }
+  },
+
+  async getConfigFromSheet(scriptUrl: string, sheetId: string, configSheet?: string): Promise<Record<string, string>> {
+    try {
+      const cSheet = configSheet || "cấu hình";
+      const res = await fetch(`${scriptUrl}?action=getConfig&sheetId=${sheetId}&configSheetName=${encodeURIComponent(cSheet)}`);
+      if (!res.ok) return {};
+      const data = await res.json();
+      return typeof data === "object" && data !== null ? data : {};
+    } catch (error) {
+      console.warn("Could not fetch remote config from sheet:", error);
+      return {};
+    }
+  },
+
+  async syncConfigToSheet(scriptUrl: string, sheetId: string, config: Record<string, string>, configSheet?: string): Promise<boolean> {
+    try {
+      const cSheet = configSheet || "cấu hình";
+      const payload = {
+        action: "syncConfig",
+        sheetId,
+        configSheetName: cSheet,
+        config
+      };
+      await fetch(scriptUrl, {
+        method: "POST",
+        mode: "no-cors",
+        body: JSON.stringify(payload)
+      });
+      return true;
+    } catch (error) {
+      console.warn("Could not sync config to sheet:", error);
+      return false;
+    }
   }
 };
 

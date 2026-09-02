@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
 import { AppConfig } from "../types";
-import { Settings, RefreshCw, Key, ChevronDown, ChevronUp, Check, AlertCircle, Sparkles, CheckCircle2 } from "lucide-react";
+import { Settings, RefreshCw, ChevronDown, ChevronUp, Check, AlertCircle } from "lucide-react";
 import { googleSheetService } from "../services/googleSheetService";
-import { geminiService, getGeminiApiKey } from "../services/geminiService";
 import { useLanguage } from "../contexts/LanguageContext";
 import LanguageSelector from "./LanguageSelector";
 
@@ -29,27 +28,6 @@ export default function ConfigScreen({ initialConfig, onSave, onSync }: Props) {
   const [readingSheetName, setReadingSheetName] = useState(initialConfig?.readingSheetName || "luyện đọc");
   const [grammarSheetName, setGrammarSheetName] = useState(initialConfig?.grammarSheetName || "ngữ pháp");
   const [ocrSheetName, setOcrSheetName] = useState(initialConfig?.ocrSheetName || "OCR");
-
-  // Gemini API Key management
-  const [geminiKey, setGeminiKey] = useState(() => {
-    return localStorage.getItem("tiengtrungAI_gemini_key") || "";
-  });
-  const [isTestingKey, setIsTestingKey] = useState(false);
-  const [keyTestResult, setKeyTestResult] = useState<{ success: boolean; message: string } | null>(null);
-
-  const handleTestKey = async () => {
-    setIsTestingKey(true);
-    setKeyTestResult(null);
-    try {
-      const activeKey = geminiKey.trim() || getGeminiApiKey();
-      const res = await geminiService.testApiKey(activeKey);
-      setKeyTestResult(res);
-    } catch (e: any) {
-      setKeyTestResult({ success: false, message: e?.message || "Lỗi kiểm tra API Key" });
-    } finally {
-      setIsTestingKey(false);
-    }
-  };
 
   const [showAdvanced, setShowAdvanced] = useState(true);
   const [availableSheets, setAvailableSheets] = useState<string[]>([]);
@@ -141,12 +119,6 @@ export default function ConfigScreen({ initialConfig, onSave, onSync }: Props) {
   };
 
   const handleSave = () => {
-    if (geminiKey.trim()) {
-      localStorage.setItem("tiengtrungAI_gemini_key", geminiKey.trim());
-    } else {
-      localStorage.removeItem("tiengtrungAI_gemini_key");
-    }
-
     if (sheetUrl && scriptUrl) {
       onSave({ 
         sheetUrl, 
@@ -196,54 +168,6 @@ export default function ConfigScreen({ initialConfig, onSave, onSync }: Props) {
               placeholder="https://script.google.com/macros/s/.../exec"
               className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all text-sm"
             />
-          </div>
-
-          {/* Gemini API Key Configuration & Test for Vercel / Live Deployment */}
-          <div className="border border-emerald-100 rounded-xl p-3.5 bg-emerald-50/40 space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-emerald-800 flex items-center gap-1.5 uppercase tracking-wider">
-                <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                Gemini API Key (Scan OCR & AI Chat)
-              </label>
-              <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-100/80 px-2 py-0.5 rounded-full">
-                {geminiKey.trim() || getGeminiApiKey() ? "Đã cấu hình" : "Chưa có Key"}
-              </span>
-            </div>
-            
-            <div className="flex gap-2">
-              <input 
-                type="password" 
-                value={geminiKey}
-                onChange={(e) => {
-                  setGeminiKey(e.target.value);
-                  setKeyTestResult(null);
-                }}
-                placeholder={getGeminiApiKey() ? "•••••••••••••••••••••••• (Đang dùng Key hệ thống)" : "Dán Gemini API Key (AIzaSy...)"}
-                className="flex-1 px-3 py-2 bg-white border border-emerald-200 rounded-lg text-xs focus:ring-1 focus:ring-emerald-500 outline-none"
-              />
-              <button
-                type="button"
-                onClick={handleTestKey}
-                disabled={isTestingKey}
-                className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all disabled:opacity-50 flex items-center gap-1 shrink-0"
-              >
-                {isTestingKey ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                <span>Kiểm tra</span>
-              </button>
-            </div>
-
-            {keyTestResult && (
-              <div className={`text-[11px] p-2 rounded-lg flex items-center gap-1.5 ${
-                keyTestResult.success ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
-              }`}>
-                {keyTestResult.success ? <Check className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
-                <span>{keyTestResult.message}</span>
-              </div>
-            )}
-            
-            <p className="text-[10px] text-neutral-500">
-              * Tự động lưu trên trình duyệt, dùng mượt mà khi chạy trên Vercel hoặc miền riêng.
-            </p>
           </div>
 
           {/* Collapsible Advanced Settings for custom sheet selection */}
@@ -407,24 +331,6 @@ export default function ConfigScreen({ initialConfig, onSave, onSync }: Props) {
               <RefreshCw className="w-3.5 h-3.5" />
               {t.configResetDefault}
             </button>
-            
-            <button 
-              onClick={async () => {
-                if (window.aistudio) {
-                  await window.aistudio.openSelectKey();
-                } else {
-                  alert(t.onlyAiStudio);
-                }
-              }}
-              className="w-full bg-white border border-neutral-200 text-neutral-600 font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
-            >
-              <Key className="w-4 h-4" />
-              {t.apiKeyConfig}
-            </button>
-            
-            <div className="text-[11px] text-neutral-400 text-center px-4">
-              {t.configQuotaWarning}
-            </div>
           </div>
         </div>
 

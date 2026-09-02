@@ -47,6 +47,22 @@ function doGet(e) {
     const data = sheet.getDataRange().getValues();
     return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON);
   }
+
+  if (action === 'getConfig') {
+    const sheetName = e.parameter.configSheetName || 'cấu hình';
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) {
+      return ContentService.createTextOutput(JSON.stringify({})).setMimeType(ContentService.MimeType.JSON);
+    }
+    const data = sheet.getDataRange().getValues();
+    const config = {};
+    for (let i = 0; i < data.length; i++) {
+      if (data[i][0]) {
+        config[data[i][0]] = data[i][1] || '';
+      }
+    }
+    return ContentService.createTextOutput(JSON.stringify(config)).setMimeType(ContentService.MimeType.JSON);
+  }
 }
 
 function doPost(e) {
@@ -54,6 +70,18 @@ function doPost(e) {
   const sheetId = params.sheetId;
   const action = params.action;
   const ss = SpreadsheetApp.openById(sheetId);
+  
+  if (action === 'syncConfig') {
+    const sheetName = params.configSheetName || 'cấu hình';
+    const sheet = ss.getSheetByName(sheetName) || ss.insertSheet(sheetName);
+    sheet.clear();
+    const configObj = params.config || {};
+    const rows = Object.entries(configObj).map(function(pair) { return [pair[0], pair[1]]; });
+    if (rows.length > 0) {
+      sheet.getRange(1, 1, rows.length, 2).setValues(rows);
+    }
+    return ContentService.createTextOutput('Success').setMimeType(ContentService.MimeType.TEXT);
+  }
   
   if (action === 'saveOCR') {
     const sheetName = params.ocrSheetName || 'OCR';

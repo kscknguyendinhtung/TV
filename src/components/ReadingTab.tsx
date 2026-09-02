@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from "react";
-import { Volume2, CheckCircle2, Trash2, FileText, ChevronRight, Play, Upload, ChevronLeft, Plus, RefreshCw } from "lucide-react";
+import { Volume2, CheckCircle2, Trash2, FileText, Play, Upload, Plus, RefreshCw } from "lucide-react";
 import { motion } from "motion/react";
 import { ReadingSentence, ReadingWord, Vocabulary } from "../types";
 import { ttsService } from "../services/ttsService";
 import { useLanguage } from "../contexts/LanguageContext";
+import { COMMON_VIETNAMESE_DICT, DictEntry } from "../data/commonVietnameseDictionary";
 
 interface Props {
   sentences: ReadingSentence[];
@@ -17,123 +18,255 @@ interface Props {
   key?: string;
 }
 
+interface ResolvedWord extends ReadingWord {
+  punctuation?: string;
+}
+
 export default function ReadingTab({ sentences, setSentences, vocabList, onUpload, isSyncing, onAnalyzeGrammar, onAddVocab, onError }: Props) {
   const { t } = useLanguage();
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [addingWord, setAddingWord] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  // Helper to extract English meaning (for top label)
-  const getEnglishMeaning = (word: ReadingWord, vocab?: Vocabulary | null): string => {
-    if (word.englishMeaning && word.englishMeaning.trim()) return word.englishMeaning;
-    
-    const source = (vocab?.meaning || word.meaning || "").trim();
-    if (!source) return "";
+  // Build a comprehensive, case-insensitive master lookup dictionary
+  const masterDictionary = useMemo(() => {
+    const dict = new Map<string, { english: string; chinese: string; pinyin: string; amBoi?: string; meaning?: string }>();
 
-    const parts = source.split(/[/|;()（）\n]/).map(s => s.trim()).filter(Boolean);
-    const latinPart = parts.find(p => /[A-Za-z]/.test(p) && !/[\u4e00-\u9fa5]/.test(p));
-    if (latinPart) return latinPart;
+    // 1. Built-in common Vietnamese dictionary
+    Object.entries(COMMON_VIETNAMESE_DICT).forEach(([rawKey, entry]) => {
+      const key = rawKey.trim().toLowerCase();
+      dict.set(key, {
+        english: entry.english,
+        chinese: entry.chinese.includes("(") ? entry.chinese : `${entry.chinese} (${entry.pinyin})`,
+        pinyin: entry.pinyin,
+        amBoi: entry.amBoi,
+        meaning: `${entry.english} / ${entry.chinese}`
+      });
+    });
 
-    const withoutChinese = source.replace(/[\u4e00-\u9fa5]+/g, "").trim().replace(/^[/,\s-]+|[/,\s-]+$/g, "");
-    if (withoutChinese) return withoutChinese;
+    // 2. All words across all sentences from OCR
+    sentences.forEach(s => {
+      if (Array.isArray(s.words)) {
+        s.words.forEach(w => {
+          if (w.char && w.char.trim()) {
+            const key = w.char.trim().toLowerCase();
+            const existing = dict.get(key);
+            
+            let english = w.englishMeaning || "";
+            let chinese = w.chineseMeaning || "";
+            let pinyin = w.pinyin || "";
 
-    return source;
-  };
+            if (!english && w.meaning) {
+              const latinMatch = w.meaning.split(/[/|;()（）\n]/).map(x => x.trim()).find(x => /[A-Za-z]/.test(x) && !/[\u4e00-\u9fa5]/.test(x));
+              if (latinMatch) english = latinMatch;
+            }
 
-  // Helper to extract Chinese meaning and Pinyin (for bottom label)
-  const getChineseAndPinyin = (word: ReadingWord, vocab?: Vocabulary | null): string => {
-    if (word.chineseMeaning && word.chineseMeaning.trim()) return word.chineseMeaning;
+            if (!chinese && (w.meaning || pinyin)) {
+              const zhMatch = (w.meaning || "").match(/[\u4e00-\u9fa5]+/g);
+              const zhText = zhMatch ? zhMatch.join(", ") : "";
+              if (zhText && pinyin) chinese = `${zhText} (${pinyin})`;
+              else if (zhText) chinese = zhText;
+              else if (pinyin) chinese = pinyin;
+            }
 
-    const pinyin = word.pinyin || vocab?.pinyin || "";
-    const hanzi = vocab?.hanViet || "";
-    
-    const source = (vocab?.meaning || word.meaning || "").trim();
-    const chineseMatches = source.match(/[\u4e00-\u9fa5]+/g);
-    const chineseText = chineseMatches ? chineseMatches.join(", ") : "";
+            dict.set(key, {
+              english: english || existing?.english || "",
+              chinese: chinese || existing?.chinese || "",
+              pinyin: pinyin || existing?.pinyin || "",
+              amBoi: w.amBoi || existing?.amBoi || "",
+              meaning: w.meaning || existing?.meaning || ""
+            });
+          }
+        });
+      }
+    });
 
-    if (chineseText && pinyin) {
-      return `${chineseText} (${pinyin})`;
-    } else if (chineseText) {
-      return chineseText;
-    } else if (pinyin) {
-      return pinyin;
-    } else if (hanzi && hanzi !== "-") {
-      return hanzi;
-    }
-    return word.amBoi || "";
-  };
+    // 3. User's saved vocabList (highest priority)
+    vocabList.forEach(v => {
+      if (v.chinese && v.chinese.trim()) {
+        const key = v.chinese.trim().toLowerCase();
+        
+        let english = "";
+        let chinese = "";
 
-  // Helper to find the best match in vocabList for a given string starting at index
-  const findBestMatch = (text: string, startIndex: number) => {
-    let bestMatch: Vocabulary | null = null;
-    let maxLength = 0;
-
-    for (const vocab of vocabList) {
-      if (text.startsWith(vocab.chinese, startIndex)) {
-        if (vocab.chinese.length > maxLength) {
-          maxLength = vocab.chinese.length;
-          bestMatch = vocab;
+        if (v.meaning) {
+          const parts = v.meaning.split(/[/|;()（）\n]/).map(s => s.trim()).filter(Boolean);
+          const latin = parts.find(p => /[A-Za-z]/.test(p) && !/[\u4e00-\u9fa5]/.test(p));
+          if (latin) english = latin;
+          else {
+            const cleaned = v.meaning.replace(/[\u4e00-\u9fa5]+/g, "").trim().replace(/^[/,\s-]+|[/,\s-]+$/g, "");
+            if (cleaned) english = cleaned;
+          }
         }
+
+        const zhMatches = (v.meaning || "").match(/[\u4e00-\u9fa5]+/g);
+        const zhText = zhMatches ? zhMatches.join(", ") : (v.hanViet !== "-" ? v.hanViet : "");
+        if (zhText && v.pinyin) {
+          chinese = `${zhText} (${v.pinyin})`;
+        } else if (zhText) {
+          chinese = zhText;
+        } else if (v.pinyin) {
+          chinese = v.pinyin;
+        }
+
+        dict.set(key, {
+          english: english || dict.get(key)?.english || v.meaning || "",
+          chinese: chinese || dict.get(key)?.chinese || v.pinyin || "",
+          pinyin: v.pinyin || dict.get(key)?.pinyin || "",
+          amBoi: v.amBoi || dict.get(key)?.amBoi || "",
+          meaning: v.meaning || dict.get(key)?.meaning || ""
+        });
+      }
+    });
+
+    return dict;
+  }, [vocabList, sentences]);
+
+  // Helper to extract word definition with fallback
+  const lookupWord = (wordText: string): { english: string; chinese: string; pinyin: string; amBoi?: string } => {
+    const cleanWord = wordText.trim().replace(/^["'([{«„]+|["')\]}»”.,!?;:]+$/g, "");
+    const lower = cleanWord.toLowerCase();
+    
+    if (masterDictionary.has(lower)) {
+      const item = masterDictionary.get(lower)!;
+      return {
+        english: item.english,
+        chinese: item.chinese,
+        pinyin: item.pinyin,
+        amBoi: item.amBoi
+      };
+    }
+
+    // Try partial word stems or single words if compound
+    const subWords = lower.split(/\s+/);
+    if (subWords.length > 1) {
+      const resolvedSubs = subWords.map(sw => masterDictionary.get(sw)).filter(Boolean);
+      if (resolvedSubs.length > 0) {
+        return {
+          english: resolvedSubs.map(r => r!.english).filter(Boolean).join(" / "),
+          chinese: resolvedSubs.map(r => r!.chinese).filter(Boolean).join(" "),
+          pinyin: resolvedSubs.map(r => r!.pinyin).filter(Boolean).join(" ")
+        };
       }
     }
-    return bestMatch;
+
+    return {
+      english: "",
+      chinese: "",
+      pinyin: ""
+    };
   };
 
-  // Process sentences to use vocabList data and handle compound words
+  // Process sentences to ensure EVERY single word (even repeated ones) has meanings
   const processedSentences = useMemo(() => {
+    // Sort all known keys by descending length for longest matching
+    const knownKeys = (Array.from(masterDictionary.keys()) as string[]).sort((a, b) => b.length - a.length);
+
     return sentences.map(sentence => {
-      const text = sentence.chinese;
-      const newWords: ReadingWord[] = [];
+      const text = sentence.chinese || "";
+      const newWords: ResolvedWord[] = [];
+      
+      // If sentence already has explicit words from OCR/API, enrich each of them
+      if (Array.isArray(sentence.words) && sentence.words.length > 0) {
+        sentence.words.forEach(w => {
+          const char = (w.char || "").trim();
+          if (!char) return;
+
+          const lookedUp = lookupWord(char);
+          const englishMeaning = w.englishMeaning || lookedUp.english || w.meaning || "";
+          const chineseMeaning = w.chineseMeaning || lookedUp.chinese || (w.pinyin ? `${char} (${w.pinyin})` : lookedUp.pinyin) || "";
+
+          newWords.push({
+            char,
+            pinyin: w.pinyin || lookedUp.pinyin || "",
+            amBoi: w.amBoi || lookedUp.amBoi || "",
+            meaning: w.meaning || lookedUp.english || "",
+            englishMeaning,
+            chineseMeaning
+          });
+        });
+
+        if (newWords.length > 0) {
+          return { ...sentence, words: newWords };
+        }
+      }
+
+      // Fallback: tokenize sentence text using dictionary keys & whitespace
       let i = 0;
-
       while (i < text.length) {
-        // 1. Try to find the longest match in vocabList
-        const vocabMatch = findBestMatch(text, i);
-        
-        // 2. Try to find if the OCR result already has a grouped word starting here
-        const ocrMatch = sentence.words?.find(w => text.startsWith(w.char, i));
-
-        // Prioritize the longer match
-        if (vocabMatch && (!ocrMatch || vocabMatch.chinese.length >= ocrMatch.char.length)) {
-          const rawWord: ReadingWord = {
-            char: vocabMatch.chinese,
-            amBoi: vocabMatch.amBoi,
-            meaning: vocabMatch.meaning,
-            pinyin: vocabMatch.pinyin
-          };
-          newWords.push({
-            ...rawWord,
-            englishMeaning: getEnglishMeaning(rawWord, vocabMatch),
-            chineseMeaning: getChineseAndPinyin(rawWord, vocabMatch)
-          });
-          i += vocabMatch.chinese.length;
-        } else if (ocrMatch) {
-          const matchedVocab = vocabList.find(v => v.chinese === ocrMatch.char);
-          newWords.push({
-            char: ocrMatch.char,
-            amBoi: ocrMatch.amBoi,
-            meaning: ocrMatch.meaning,
-            pinyin: ocrMatch.pinyin || matchedVocab?.pinyin,
-            englishMeaning: ocrMatch.englishMeaning || getEnglishMeaning(ocrMatch, matchedVocab),
-            chineseMeaning: ocrMatch.chineseMeaning || getChineseAndPinyin(ocrMatch, matchedVocab)
-          });
-          i += ocrMatch.char.length;
-        } else {
-          // Fallback to single character
-          newWords.push({
-            char: text[i],
-            amBoi: "",
-            meaning: "",
-            englishMeaning: "",
-            chineseMeaning: ""
-          });
+        // Skip whitespace
+        if (text[i] === " ") {
           i++;
+          continue;
+        }
+
+        const remaining = text.slice(i);
+        const remainingLower = remaining.toLowerCase();
+
+        // 1. Try finding longest matching phrase in masterDictionary
+        let matchedKey: string | null = null;
+        for (const key of knownKeys) {
+          if (remainingLower.startsWith(key)) {
+            // Check boundary: next char should be space, punctuation, or end of string
+            const nextChar = remainingLower[key.length];
+            if (!nextChar || /\s|[.,!?;:()"'«»]/.test(nextChar)) {
+              matchedKey = key;
+              break;
+            }
+          }
+        }
+
+        if (matchedKey) {
+          const matchedOriginalText = remaining.slice(0, matchedKey.length);
+          const lookedUp = lookupWord(matchedOriginalText);
+
+          newWords.push({
+            char: matchedOriginalText,
+            pinyin: lookedUp.pinyin,
+            amBoi: lookedUp.amBoi || "",
+            meaning: lookedUp.english,
+            englishMeaning: lookedUp.english,
+            chineseMeaning: lookedUp.chinese
+          });
+          i += matchedKey.length;
+        } else {
+          // Tokenize next single word until space or punctuation
+          const match = remaining.match(/^([^\s.,!?;:()"'«»]+)([.,!?;:()"'«»]*)/);
+          if (match) {
+            const rawWord = match[1];
+            const punct = match[2];
+            const lookedUp = lookupWord(rawWord);
+
+            newWords.push({
+              char: rawWord,
+              punctuation: punct,
+              pinyin: lookedUp.pinyin,
+              amBoi: lookedUp.amBoi || "",
+              meaning: lookedUp.english,
+              englishMeaning: lookedUp.english,
+              chineseMeaning: lookedUp.chinese
+            });
+            i += match[0].length;
+          } else {
+            // Single char fallback
+            const char = text[i];
+            const lookedUp = lookupWord(char);
+            newWords.push({
+              char,
+              pinyin: lookedUp.pinyin,
+              amBoi: "",
+              meaning: lookedUp.english,
+              englishMeaning: lookedUp.english,
+              chineseMeaning: lookedUp.chinese
+            });
+            i++;
+          }
         }
       }
 
       return { ...sentence, words: newWords };
     });
-  }, [sentences, vocabList]);
+  }, [sentences, masterDictionary]);
 
   const speak = (text: string) => {
     ttsService.speak(text, "vi-VN", playbackSpeed);
@@ -212,23 +345,28 @@ export default function ReadingTab({ sentences, setSentences, vocabList, onUploa
               {/* Word-by-word display: English above, Vietnamese in middle, Chinese/Pinyin below */}
               <div className="flex flex-wrap gap-x-5 gap-y-8 justify-center items-end py-2">
                 {sentence.words.map((word, j) => {
-                  const isInVocab = vocabList.some(v => v.chinese === word.char);
+                  const isInVocab = vocabList.some(v => v.chinese.toLowerCase() === word.char.toLowerCase());
                   return (
-                    <div key={j} className="flex flex-col items-center group relative min-w-[50px]">
-                      {/* Top: English meaning */}
+                    <div key={j} className="flex flex-col items-center group relative min-w-[54px]">
+                      {/* Top: English meaning - ALWAYS displayed, even on repeat */}
                       {word.englishMeaning ? (
                         <span 
-                          className="text-[11px] font-semibold text-sky-700 bg-sky-50 border border-sky-100 px-1.5 py-0.5 rounded-md mb-1 text-center tracking-tight max-w-[130px] truncate block"
+                          className="text-[11px] font-semibold text-sky-700 bg-sky-50/90 border border-sky-200/80 px-2 py-0.5 rounded-md mb-1 text-center tracking-tight max-w-[140px] truncate block shadow-xs"
                           title={`English: ${word.englishMeaning}`}
                         >
                           {word.englishMeaning}
                         </span>
                       ) : (
-                        <span className="text-[10px] text-neutral-400 font-medium mb-1">&nbsp;</span>
+                        <span 
+                          className="text-[10px] font-medium text-neutral-400 bg-neutral-50 px-1.5 py-0.5 rounded mb-1 text-center truncate max-w-[100px]"
+                          title="Từ vựng"
+                        >
+                          {word.char}
+                        </span>
                       )}
 
                       {/* Middle: Vietnamese Word */}
-                      <div className="relative my-0.5">
+                      <div className="relative my-0.5 flex items-center">
                         <span 
                           className="text-2xl md:text-3xl font-bold text-neutral-800 hover:text-emerald-600 transition-colors cursor-pointer block tracking-wide select-none"
                           onClick={() => speak(word.char)}
@@ -252,16 +390,20 @@ export default function ReadingTab({ sentences, setSentences, vocabList, onUploa
                         )}
                       </div>
 
-                      {/* Bottom: Chinese meaning & Pinyin */}
+                      {/* Bottom: Chinese meaning & Pinyin - ALWAYS displayed, even on repeat */}
                       {word.chineseMeaning ? (
                         <span 
-                          className="text-[11px] font-medium text-emerald-800 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded-md mt-1 text-center tracking-tight max-w-[130px] truncate block"
+                          className="text-[11px] font-medium text-emerald-800 bg-emerald-50/90 border border-emerald-200/80 px-2 py-0.5 rounded-md mt-1 text-center tracking-tight max-w-[140px] truncate block shadow-xs"
                           title={`Chinese / Pinyin: ${word.chineseMeaning}`}
                         >
                           {word.chineseMeaning}
                         </span>
                       ) : (
-                        <span className="text-[10px] text-neutral-400 font-medium mt-1">&nbsp;</span>
+                        <span 
+                          className="text-[10px] font-medium text-neutral-400 bg-neutral-50 px-1.5 py-0.5 rounded mt-1 text-center truncate max-w-[100px]"
+                        >
+                          {word.pinyin || "—"}
+                        </span>
                       )}
                     </div>
                   );
@@ -324,3 +466,4 @@ export default function ReadingTab({ sentences, setSentences, vocabList, onUploa
     </motion.div>
   );
 }
+

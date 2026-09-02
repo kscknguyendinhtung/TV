@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
+import { handleGeminiAction } from "./src/server/geminiBackend";
 
 dotenv.config();
 
@@ -12,7 +13,22 @@ const PORT = 3000;
 const ttsCache = new Map<string, { buffer: Buffer; contentType: string }>();
 
 // Enable JSON body parsing for API endpoints
-app.use(express.json({ limit: "20mb" }));
+app.use(express.json({ limit: "50mb" }));
+
+// Server-side Gemini API proxy (Keeps API key secure on server)
+app.post("/api/gemini", async (req, res) => {
+  try {
+    const { action, payload } = req.body || {};
+    if (!action) {
+      return res.status(400).json({ error: "Missing 'action' in request body" });
+    }
+    const result = await handleGeminiAction(action, payload || {});
+    res.json(result);
+  } catch (error: any) {
+    console.error("Server Gemini API Error:", error);
+    res.status(500).json({ error: error?.message || "Internal Server Error" });
+  }
+});
 
 // TTS Proxy endpoint that works universally across development and production
 app.get("/api/tts", async (req, res) => {

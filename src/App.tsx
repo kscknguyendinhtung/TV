@@ -91,6 +91,17 @@ export default function App() {
     if (savedVocab) setVocabList(JSON.parse(savedVocab));
     if (savedReading) setReadingSentences(JSON.parse(savedReading));
     if (savedGrammar) setGrammarPoints(JSON.parse(savedGrammar));
+
+    // Auto check remote config and shared API key on startup
+    const targetConfig = savedConfig ? JSON.parse(savedConfig) : DEFAULT_CONFIG;
+    if (targetConfig.scriptUrl && targetConfig.sheetUrl) {
+      const sheetId = extractSheetId(targetConfig.sheetUrl);
+      googleSheetService.getConfigFromSheet(targetConfig.scriptUrl, sheetId).then(remoteConfig => {
+        if (remoteConfig && remoteConfig.geminiApiKey) {
+          geminiService.setSharedApiKey(remoteConfig.geminiApiKey);
+        }
+      }).catch(() => {});
+    }
   }, []);
 
   // Save to local storage
@@ -106,14 +117,22 @@ export default function App() {
     setIsSyncing(true);
     try {
       const sheetId = extractSheetId(config.sheetUrl);
-      const res = await googleSheetService.syncFromSheet(
-        config.scriptUrl, 
-        sheetId,
-        config.vocabSheetName,
-        config.readingSheetName,
-        config.grammarSheetName
-      );
+      // Fetch sheet data and remote config in parallel
+      const [res, remoteConfig] = await Promise.all([
+        googleSheetService.syncFromSheet(
+          config.scriptUrl, 
+          sheetId,
+          config.vocabSheetName,
+          config.readingSheetName,
+          config.grammarSheetName
+        ),
+        googleSheetService.getConfigFromSheet(config.scriptUrl, sheetId).catch(() => ({} as Record<string, string>))
+      ]);
       
+      if (remoteConfig && remoteConfig.geminiApiKey) {
+        geminiService.setSharedApiKey(remoteConfig.geminiApiKey);
+      }
+
       if (res) {
         setVocabList(res.vocab);
         setReadingSentences(res.reading);
@@ -179,18 +198,7 @@ export default function App() {
   const handleAIError = async (error: any) => {
     const errorMsg = typeof error === 'string' ? error : (error?.message || JSON.stringify(error));
     if (errorMsg.includes("429") || errorMsg.includes("RESOURCE_EXHAUSTED")) {
-      if (window.aistudio) {
-        const hasKey = await window.aistudio.hasSelectedApiKey();
-        if (!hasKey) {
-          alert(t.aiQuotaWarning);
-          await window.aistudio.openSelectKey();
-          return true; // Handled
-        } else {
-          alert(t.configQuotaWarning);
-        }
-      } else {
-        alert(t.aiQuotaWarning);
-      }
+      alert(t.aiQuotaWarning || "Hệ thống AI đang bận hoặc đạt giới hạn lượt dùng, vui lòng thử lại sau giây lát.");
       return true;
     }
 
@@ -198,13 +206,9 @@ export default function App() {
       errorMsg.includes("API key not valid") || 
       errorMsg.includes("API_KEY_INVALID") || 
       errorMsg.includes("API key") || 
-      errorMsg.includes("Chưa có Gemini API Key") ||
       errorMsg.includes("PERMISSION_DENIED")
     ) {
-      const goToSettings = confirm("Gemini API Key chưa được cài đặt hoặc không hợp lệ trên môi trường này. Bạn có muốn mở tab Cài đặt để nhập API Key không?");
-      if (goToSettings) {
-        setActiveTab("config");
-      }
+      alert("Hệ thống AI đang được bảo trì hoặc khóa API cần được cập nhật trên máy chủ. Vui lòng liên hệ quản trị viên.");
       return true;
     }
     return false;
