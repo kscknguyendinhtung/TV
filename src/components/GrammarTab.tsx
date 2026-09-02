@@ -37,24 +37,62 @@ export default function GrammarTab({ points, setPoints, onUpload, isSyncing }: P
     ttsService.speak(text, "vi-VN");
   };
 
+  const compressImage = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const MAX_DIM = 1600;
+          let width = img.width;
+          let height = img.height;
+          if (width > MAX_DIM || height > MAX_DIM) {
+            if (width > height) {
+              height = Math.round((height * MAX_DIM) / width);
+              width = MAX_DIM;
+            } else {
+              width = Math.round((width * MAX_DIM) / height);
+              height = MAX_DIM;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL("image/jpeg", 0.85));
+          } else {
+            resolve(e.target?.result as string);
+          }
+        };
+        img.onerror = () => {
+          resolve(e.target?.result as string);
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsScanning(true);
     try {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const base64 = event.target?.result as string;
-        const newPoints = await geminiService.performGrammarOCR(base64);
+      const base64 = await compressImage(file);
+      const newPoints = await geminiService.performGrammarOCR(base64);
+      if (newPoints && newPoints.length > 0) {
         setPoints(prev => [...prev, ...newPoints]);
-        setIsScanning(false);
-      };
-      reader.readAsDataURL(file);
+      }
     } catch (error) {
       console.error("Grammar OCR Error:", error);
       alert(t.grammarScanError);
+    } finally {
       setIsScanning(false);
+      e.target.value = "";
     }
   };
 

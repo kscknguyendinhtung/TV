@@ -28,6 +28,9 @@ export interface ReadingWord {
   char: string;
   amBoi: string;
   meaning: string;
+  englishMeaning?: string;
+  chineseMeaning?: string;
+  pinyin?: string;
 }
 
 export interface GrammarPoint {

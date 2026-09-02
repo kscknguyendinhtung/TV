@@ -24,43 +24,75 @@ export default function OCRTab({ config, onResult, onError }: Props) {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
+  const compressImage = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const MAX_DIM = 1600;
+          let width = img.width;
+          let height = img.height;
+          if (width > MAX_DIM || height > MAX_DIM) {
+            if (width > height) {
+              height = Math.round((height * MAX_DIM) / width);
+              width = MAX_DIM;
+            } else {
+              width = Math.round((width * MAX_DIM) / height);
+              height = MAX_DIM;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL("image/jpeg", 0.85));
+          } else {
+            resolve(e.target?.result as string);
+          }
+        };
+        img.onerror = () => {
+          resolve(e.target?.result as string);
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
   const processFile = async (file: File) => {
     if (!file) return;
 
     setIsProcessing(true);
     setStatusMessage(t.ocrReadingImage);
     try {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        try {
-          const base64 = reader.result as string;
-          const result = await geminiService.performOCR(base64);
-          
-          setStatusMessage(t.ocrReadDone);
-          
-          // Save to Google Sheet
-          const sheetId = config.sheetUrl.match(/\/d\/(.*?)(\/|$)/)?.[1] || config.sheetUrl;
-          await googleSheetService.saveOCRToSheet(config.scriptUrl, sheetId, result.originalText, config.ocrSheetName);
-          
-          setTimeout(() => {
-            onResult(result);
-          }, 1000);
-        } catch (error) {
-          console.error("OCR Inner Error:", error);
-          const handled = await onError(error);
-          if (!handled) {
-            alert(t.ocrScanError);
-          }
-          setIsProcessing(false);
-          setStatusMessage("");
-        }
-      };
-      reader.readAsDataURL(file);
+      const base64 = await compressImage(file);
+      const result = await geminiService.performOCR(base64);
+      
+      setStatusMessage(t.ocrReadDone);
+      
+      // Save to Google Sheet (non-blocking)
+      try {
+        const sheetId = config.sheetUrl.match(/\/d\/(.*?)(\/|$)/)?.[1] || config.sheetUrl;
+        await googleSheetService.saveOCRToSheet(config.scriptUrl, sheetId, result.originalText, config.ocrSheetName);
+      } catch (sheetErr) {
+        console.warn("Could not save to sheet:", sheetErr);
+      }
+      
+      setTimeout(() => {
+        onResult(result);
+      }, 500);
     } catch (error) {
       console.error("OCR Error:", error);
+      const handled = await onError(error);
+      if (!handled) {
+        alert(t.ocrScanError);
+      }
       setIsProcessing(false);
       setStatusMessage("");
-      alert(t.ocrFileError);
     }
   };
 

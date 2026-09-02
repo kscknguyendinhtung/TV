@@ -14,9 +14,9 @@ import {
   Square
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { GoogleGenAI, Modality } from "@google/genai";
 import { useLanguage } from "../contexts/LanguageContext";
 import { ttsService } from "../services/ttsService";
+import { geminiService } from "../services/geminiService";
 
 interface Message {
   role: "user" | "model";
@@ -92,47 +92,13 @@ export default function ChatTab({ onError }: { onError: (error: any) => void | P
     setIsSending(true);
 
     try {
-      const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY || "";
-      const ai = new GoogleGenAI({ apiKey });
-      
-      const targetLangName = language === "vi" ? "Vietnamese" : language === "zh" ? "Chinese" : "English";
+      const historyPayload = [...messages, userMsg].map(m => ({
+        role: m.role,
+        text: m.text
+      }));
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
-        contents: [...messages, userMsg].map(m => ({
-          role: m.role,
-          parts: [{ text: m.text }]
-        })),
-        config: {
-          systemInstruction: `You are a friendly, patient, and encouraging Vietnamese conversation partner and tutor named Minh (or Mai).
-          Your mission is to help the user practice and learn Vietnamese.
-          When the user sends a message in Vietnamese, English, or Chinese, reply in natural, authentic, everyday Vietnamese.
-          
-          IMPORTANT: You MUST return a JSON response for BOTH the user's message and your response.
-          The "text" field MUST contain natural Vietnamese text.
-          The "meaning" field should provide a clear translation in ${targetLangName}.
-          The "pinyin" field can provide tone guidance / phonetics / helpful learning notes for Vietnamese learners.
-          
-          JSON structure:
-          {
-            "userMessage": {
-              "text": "User's message in Vietnamese (translated to Vietnamese if they spoke English/Chinese, or refined Vietnamese if they wrote Vietnamese)",
-              "pinyin": "Phonetic/Tone tips for this sentence",
-              "meaning": "Translation of user message in ${targetLangName}"
-            },
-            "modelResponse": {
-              "text": "Your reply in authentic, natural Vietnamese",
-              "pinyin": "Pronunciation/Tone guide or vocabulary tips",
-              "meaning": "Translation of your reply in ${targetLangName}"
-            }
-          }
-          
-          Be conversational, friendly, encouraging, and ask engaging follow-up questions to keep the conversation going.`,
-          responseMimeType: "application/json"
-        }
-      });
-
-      const result = JSON.parse(response.text || "{}");
+      const targetLang = language === "zh" ? "zh" : language === "en" ? "en" : "vi";
+      const result = await geminiService.sendChatMessage(historyPayload, targetLang);
       
       if (result.userMessage && result.modelResponse) {
         setMessages(prev => {

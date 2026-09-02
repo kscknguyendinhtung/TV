@@ -177,7 +177,7 @@ export default function App() {
   };
 
   const handleAIError = async (error: any) => {
-    const errorMsg = typeof error === 'string' ? error : JSON.stringify(error);
+    const errorMsg = typeof error === 'string' ? error : (error?.message || JSON.stringify(error));
     if (errorMsg.includes("429") || errorMsg.includes("RESOURCE_EXHAUSTED")) {
       if (window.aistudio) {
         const hasKey = await window.aistudio.hasSelectedApiKey();
@@ -191,6 +191,21 @@ export default function App() {
       } else {
         alert(t.aiQuotaWarning);
       }
+      return true;
+    }
+
+    if (
+      errorMsg.includes("API key not valid") || 
+      errorMsg.includes("API_KEY_INVALID") || 
+      errorMsg.includes("API key") || 
+      errorMsg.includes("Chưa có Gemini API Key") ||
+      errorMsg.includes("PERMISSION_DENIED")
+    ) {
+      const goToSettings = confirm("Gemini API Key chưa được cài đặt hoặc không hợp lệ trên môi trường này. Bạn có muốn mở tab Cài đặt để nhập API Key không?");
+      if (goToSettings) {
+        setActiveTab("config");
+      }
+      return true;
     }
     return false;
   };

@@ -1,40 +1,164 @@
-import { GoogleGenAI, Type } from "@google/genai";
-import { OCRResult, Vocabulary, GrammarPoint, GrammarQuizQuestion } from "../types";
+import { GoogleGenAI } from "@google/genai";
+import { OCRResult, Vocabulary, GrammarPoint, GrammarQuizQuestion, ReadingSentence } from "../types";
+
+export const getGeminiApiKey = (): string => {
+  // 1. Check user-defined key stored in localStorage (works in any deployment, e.g. Vercel, custom domain)
+  if (typeof window !== "undefined") {
+    const customKey = localStorage.getItem("tiengtrungAI_gemini_key");
+    if (customKey && customKey.trim()) {
+      return customKey.trim();
+    }
+  }
+
+  // 2. Check import.meta.env (Vite client-side environment)
+  try {
+    const metaEnv = (import.meta as any)?.env;
+    if (metaEnv) {
+      if (metaEnv.VITE_GEMINI_API_KEY) return metaEnv.VITE_GEMINI_API_KEY;
+      if (metaEnv.VITE_API_KEY) return metaEnv.VITE_API_KEY;
+      if (metaEnv.GEMINI_API_KEY) return metaEnv.GEMINI_API_KEY;
+    }
+  } catch (e) {
+    // Ignore error in non-meta environments
+  }
+
+  // 3. Check process.env (safely with polyfilled / bundled values)
+  try {
+    if (typeof process !== "undefined" && process.env) {
+      if (process.env.GEMINI_API_KEY) return process.env.GEMINI_API_KEY;
+      if (process.env.API_KEY) return process.env.API_KEY;
+      if (process.env.VITE_GEMINI_API_KEY) return process.env.VITE_GEMINI_API_KEY;
+    }
+  } catch (e) {
+    // Ignore error
+  }
+
+  return "";
+};
 
 const getAI = () => {
-  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY || "";
-  return new GoogleGenAI({ apiKey });
+  const apiKey = getGeminiApiKey();
+  return new GoogleGenAI({ 
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build'
+      }
+    }
+  });
+};
+
+/**
+ * Safely extracts and parses JSON from Gemini responses, handling markdown codeblocks,
+ * leading/trailing explanations, or slight formatting variations.
+ */
+export const cleanAndParseJSON = <T = any>(rawText?: string, fallback: any = {}): T => {
+  if (!rawText || typeof rawText !== "string") return fallback;
+
+  let cleaned = rawText.trim();
+  
+  // Remove markdown code fences ```json ... ``` or ``` ... ```
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  }
+
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch (e) {
+    // Attempt to extract the first balanced JSON object {...} or array [...]
+    const firstBrace = cleaned.indexOf("{");
+    const firstBracket = cleaned.indexOf("[");
+
+    if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+      const lastBrace = cleaned.lastIndexOf("}");
+      if (lastBrace > firstBrace) {
+        try {
+          const substr = cleaned.slice(firstBrace, lastBrace + 1);
+          return JSON.parse(substr) as T;
+        } catch {}
+      }
+    } else if (firstBracket !== -1) {
+      const lastBracket = cleaned.lastIndexOf("]");
+      if (lastBracket > firstBracket) {
+        try {
+          const substr = cleaned.slice(firstBracket, lastBracket + 1);
+          return JSON.parse(substr) as T;
+        } catch {}
+      }
+    }
+
+    console.warn("Could not parse JSON from Gemini response:", rawText);
+    return fallback;
+  }
+};
+
+/**
+ * Extracts raw base64 data and mimeType safely from data URI strings or pure base64.
+ */
+const parseImageData = (base64Image: string): { data: string; mimeType: string } => {
+  let mimeType = "image/jpeg";
+  let data = base64Image;
+
+  if (base64Image.includes(",")) {
+    const parts = base64Image.split(",");
+    data = parts[1];
+    const header = parts[0];
+    const match = header.match(/data:([^;]+);/);
+    if (match && match[1]) {
+      mimeType = match[1];
+    }
+  }
+
+  return { data, mimeType };
 };
 
 export const geminiService = {
+  async testApiKey(keyToTest?: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const apiKey = keyToTest || getGeminiApiKey();
+      if (!apiKey) {
+        return { success: false, message: "Chưa có Gemini API Key" };
+      }
+      const ai = new GoogleGenAI({ apiKey });
+      const res = await ai.models.generateContent({
+        model: "gemini-3.7-flash",
+        contents: "Hello, reply with 1 word: OK"
+      });
+      if (res.text && res.text.length > 0) {
+        return { success: true, message: "Kết nối Gemini API thành công!" };
+      }
+      return { success: false, message: "Không nhận được phản hồi từ AI" };
+    } catch (error: any) {
+      console.error("Gemini Test Error:", error);
+      return { success: false, message: error?.message || "Lỗi xác thực API Key" };
+    }
+  },
+
   async performOCR(base64Image: string): Promise<OCRResult> {
     const ai = getAI();
     const model = "gemini-3.7-flash";
-    const prompt = `
-      Analyze this image containing Vietnamese text (or bilingual Vietnamese learning materials). 
-      1. Extract all Vietnamese text (OCR).
-      2. Split the text into meaningful Vietnamese sentences for learners.
-      3. For each sentence, group words into meaningful compound words (từ ghép tiếng Việt) where applicable (e.g., 'học tập', 'phát triển', 'thời gian', 'cảm ơn', 'xin chào').
-      4. For each sentence:
-         - 'chinese' field: Put the original Vietnamese sentence.
-         - 'pinyin' field: Put the phonetic/pronunciation guide or tone annotation for Vietnamese learners.
-         - 'meaning' field: Provide English/Chinese translation of the sentence.
-      5. For each grouped word (từ đơn / từ ghép) in each sentence:
-         - 'char': The Vietnamese word/phrase.
-         - 'amBoi': Phonetic/Tone guide (e.g., 'Dấu sắc + Thanh ngang' or phonetic aid).
-         - 'meaning': English / Chinese translation of this word.
+    const { data, mimeType } = parseImageData(base64Image);
 
-      6. Extract an EXHAUSTIVE list of all unique Vietnamese vocabulary items found in the text. 
-      7. For each vocabulary item, provide FULL details:
-         - 'chinese': Vietnamese word/phrase (e.g., 'hợp tác', 'kinh nghiệm', 'thành công').
-         - 'pinyin': Phonetic guide / pronunciation.
-         - 'amBoi': Pronunciation/Tone guide.
-         - 'meaning': English and/or Chinese meaning.
-         - 'hanViet': Hán Việt (Sino-Vietnamese root or Chinese characters if applicable, e.g., 'Hợp tác (合作)', or '-' if purely native).
-         - 'wordType': Loại từ (Danh từ, Động từ, Tính từ, Phó từ, Liên từ, Trợ từ, Đại từ, Lượng từ...).
-         - 'topic': Chủ đề (Giao tiếp, Công việc, Gia đình, Xã hội, Giáo dục, Sản xuất, Mua sắm...).
+    const prompt = `
+      Analyze this image containing Vietnamese text or bilingual Vietnamese study materials.
+      Tasks:
+      1. Extract all Vietnamese text (OCR).
+      2. Split the text into meaningful sentences for learners.
+      3. For each sentence, break it down into meaningful compound words (từ ghép tiếng Việt) and single words where appropriate (e.g., 'học tập', 'phát triển', 'thời gian', 'xin chào', 'cảm ơn', 'hợp tác').
+      4. For each sentence:
+         - 'chinese': The full Vietnamese sentence.
+         - 'pinyin': Pronunciation / tone guide for the sentence.
+         - 'meaning': Vietnamese & English meaning of the full sentence.
+      5. For each word in each sentence's 'words' array:
+         - 'char': The Vietnamese word/compound phrase (e.g. 'học tập').
+         - 'englishMeaning': Short, precise English translation (e.g. 'study, learn').
+         - 'chineseMeaning': Chinese translation and pinyin (e.g. '学习 (xuéxí)').
+         - 'pinyin': Chinese pinyin or tone guide (e.g. 'xuéxí').
+         - 'amBoi': Vietnamese tone description or phonetic aid.
+         - 'meaning': Combined English / Chinese meaning.
+      6. Extract an EXHAUSTIVE list of all unique Vietnamese vocabulary items found in the text with full properties.
       
-      Return the result in JSON format matching this structure:
+      Return JSON ONLY with this structure:
       {
         "originalText": "string",
         "sentences": [
@@ -43,7 +167,14 @@ export const geminiService = {
             "pinyin": "string",
             "meaning": "string",
             "words": [
-              { "char": "string", "amBoi": "string", "meaning": "string" }
+              {
+                "char": "string",
+                "englishMeaning": "string",
+                "chineseMeaning": "string",
+                "pinyin": "string",
+                "amBoi": "string",
+                "meaning": "string"
+              }
             ]
           }
         ],
@@ -67,7 +198,7 @@ export const geminiService = {
         contents: [
           {
             parts: [
-              { inlineData: { data: base64Image.split(",")[1], mimeType: "image/jpeg" } },
+              { inlineData: { data, mimeType } },
               { text: prompt }
             ]
           }
@@ -77,9 +208,10 @@ export const geminiService = {
         }
       });
 
-      const result = JSON.parse(response.text || "{}") as OCRResult;
+      const result = cleanAndParseJSON<OCRResult>(response.text, { originalText: "", sentences: [], words: [] });
+      
       // Ensure all word objects have required fields
-      if (result.words) {
+      if (result.words && Array.isArray(result.words)) {
         result.words = result.words.map(w => ({
           ...w,
           isMastered: false,
@@ -87,6 +219,21 @@ export const geminiService = {
           wordType: w.wordType || "Chưa phân loại"
         }));
       }
+
+      if (result.sentences && Array.isArray(result.sentences)) {
+        result.sentences = result.sentences.map(s => ({
+          ...s,
+          isMastered: false,
+          words: Array.isArray(s.words) ? s.words.map(w => ({
+            ...w,
+            englishMeaning: w.englishMeaning || w.meaning || "",
+            chineseMeaning: w.chineseMeaning || w.pinyin || "",
+            pinyin: w.pinyin || "",
+            amBoi: w.amBoi || ""
+          })) : []
+        }));
+      }
+
       return result;
     } catch (error) {
       console.error("Gemini OCR Error:", error);
@@ -105,7 +252,7 @@ export const geminiService = {
       2. Với mỗi từ, cung cấp đầy đủ:
          - chinese: Từ/cụm từ tiếng Việt gốc.
          - pinyin: Phiên âm/Cách phát âm/Thanh điệu cho người học.
-         - amBoi: Hướng dẫn phát âm / Thanh điệu (ví dụ: Thanh hỏi, sắc, huyền...).
+         - amBoi: Hướng dẫn phát âm / Thanh điệu.
          - meaning: Nghĩa tiếng Anh và tiếng Trung.
          - hanViet: Gốc Hán Việt hoặc chữ Hán tương ứng (nếu có).
          - wordType: Loại từ (Danh từ, Động từ, Tính từ, Trạng từ, Liên từ, Trợ từ...).
@@ -135,7 +282,7 @@ export const geminiService = {
         }
       });
 
-      const words = JSON.parse(response.text || "[]") as Vocabulary[];
+      const words = cleanAndParseJSON<Vocabulary[]>(response.text, []);
       return words.map(w => ({ ...w, isMastered: false }));
     } catch (error) {
       console.error("Gemini Text Extraction Error:", error);
@@ -172,7 +319,7 @@ export const geminiService = {
         }
       });
 
-      const data = JSON.parse(response.text || "{}");
+      const data = cleanAndParseJSON<Partial<Vocabulary>>(response.text, {});
       return {
         ...data,
         chinese: word,
@@ -210,7 +357,7 @@ export const geminiService = {
         }
       });
 
-      return JSON.parse(response.text || "[]");
+      return cleanAndParseJSON<GrammarPoint[]>(response.text, []);
     } catch (error) {
       console.error("Gemini Grammar Error:", error);
       return [];
@@ -220,6 +367,8 @@ export const geminiService = {
   async performGrammarOCR(base64Image: string): Promise<GrammarPoint[]> {
     const ai = getAI();
     const model = "gemini-3.7-flash";
+    const { data, mimeType } = parseImageData(base64Image);
+
     const prompt = `
       Phân tích hình ảnh chứa kiến thức ngữ pháp tiếng Việt sau.
       
@@ -242,7 +391,7 @@ export const geminiService = {
         contents: [
           {
             parts: [
-              { inlineData: { data: base64Image.split(",")[1], mimeType: "image/jpeg" } },
+              { inlineData: { data, mimeType } },
               { text: prompt }
             ]
           }
@@ -252,7 +401,7 @@ export const geminiService = {
         }
       });
 
-      return JSON.parse(response.text || "[]");
+      return cleanAndParseJSON<GrammarPoint[]>(response.text, []);
     } catch (error) {
       console.error("Gemini Grammar OCR Error:", error);
       return [];
@@ -297,7 +446,7 @@ export const geminiService = {
         }
       });
 
-      return JSON.parse(response.text || "[]");
+      return cleanAndParseJSON<GrammarQuizQuestion[]>(response.text, []);
     } catch (error) {
       console.error("Gemini Quiz Generation Error:", error);
       return [];
@@ -315,15 +464,10 @@ export const geminiService = {
       1. Nhận diện văn bản (recognizedText): Ghi lại chính xác những gì người dùng đã phát âm bằng tiếng Việt.
          - Nếu im lặng hoặc chỉ có tiếng ồn: recognizedText = "", score = 0.
       2. Đánh giá chi tiết các yếu tố tiếng Việt:
-         - Dấu thanh (6 thanh điệu: Ngang, Huyền, Sắc, Hỏi, Ngã, Nặng): Đây là linh hồn của tiếng Việt. Kiểm tra xem người học có phát âm chuẩn dấu thanh không (ví dụ nhầm dấu hỏi với dấu ngã, dấu sắc với dấu nặng).
-         - Nguyên âm & Phụ âm (Vowels & Consonants): Kiểm tra các nguyên âm đặc trưng như ă, â, ê, ô, ơ, ư và các phụ âm tr/ch, s/x, r/d/gi, ng/ngh.
-      3. Chấm điểm (score) từ 0 đến 10:
-         - 10: Phát âm hoàn hảo như người bản xứ.
-         - 8-9: Rất tốt, phát âm chuẩn rõ, chỉ có lỗi nhỏ không đáng kể.
-         - 6-7: Hiểu được nhưng dấu thanh chưa rõ hoặc bị ngọng âm.
-         - 4-5: Sai nhiều thanh điệu hoặc nguyên âm.
-         - 0-3: Sai hoàn toàn hoặc không nói gì.
-      4. Phản hồi (feedback): Nhận xét bằng tiếng Việt & tiếng Anh ngắn gọn. Chỉ rõ từ nào sai dấu thanh gì, cách uốn lưỡi mở khẩu hình để phát âm đúng.
+         - Dấu thanh (6 thanh điệu: Ngang, Huyền, Sắc, Hỏi, Ngã, Nặng): Kiểm tra xem người học có phát âm chuẩn dấu thanh không.
+         - Nguyên âm & Phụ âm: Kiểm tra các nguyên âm đặc trưng như ă, â, ê, ô, ơ, ư và phụ âm tr/ch, s/x, r/d/gi, ng/ngh.
+      3. Chấm điểm (score) từ 0 đến 10.
+      4. Phản hồi (feedback): Nhận xét bằng tiếng Việt & tiếng Anh ngắn gọn.
       
       Trả về JSON:
       {
@@ -349,7 +493,7 @@ export const geminiService = {
         }
       });
 
-      return JSON.parse(response.text || "{}");
+      return cleanAndParseJSON(response.text, { score: 0, feedback: "Lỗi khi đánh giá giọng nói.", recognizedText: "" });
     } catch (error) {
       console.error("Gemini Speech Evaluation Error:", error);
       return { score: 0, feedback: "Lỗi khi đánh giá giọng nói.", recognizedText: "" };
@@ -371,16 +515,8 @@ export const geminiService = {
       
       Yêu cầu:
       1. related: Tìm 3-5 từ ghép hoặc từ vựng tiếng Việt liên quan mật thiết đến "${word}".
-         - chinese: Từ ghép tiếng Việt liên quan (Ví dụ nếu từ gốc là 'học', các từ liên quan là 'học tập', 'học sinh', 'du học', 'học bổng').
-         - pinyin: Hướng dẫn phát âm / phiên âm.
-         - meaning: Nghĩa tiếng Anh / tiếng Trung.
-         - reason: Giải thích ngắn gọn lý do liên quan.
-         - hanViet: Gốc Hán Việt hoặc chữ Hán tương ứng nếu có.
-      2. antonyms: Tìm 2-3 từ trái nghĩa tiếng Việt với từ gốc (Ví dụ: 'nhanh' <-> 'chậm', 'thành công' <-> 'thất bại').
+      2. antonyms: Tìm 2-3 từ trái nghĩa tiếng Việt với từ gốc.
       3. characterAnalysis: Phân tích các tiếng / hình vị cấu thành nên từ tiếng Việt.
-         - char: Tiếng đơn cấu thành.
-         - meaning: Ý nghĩa của tiếng đó.
-         - examples: 2 ví dụ từ ghép tiếng Việt khác chứa tiếng đó kèm nghĩa.
       
       Trả về JSON theo cấu trúc:
       {
@@ -411,11 +547,66 @@ export const geminiService = {
         }
       });
 
-      return JSON.parse(response.text || "{}");
+      return cleanAndParseJSON(response.text, { related: [], antonyms: [], characterAnalysis: [] });
     } catch (error) {
       console.error("Gemini Related Words Error:", error);
       return { related: [], antonyms: [], characterAnalysis: [] };
     }
+  },
+
+  async sendChatMessage(messages: { role: "user" | "model"; text: string }[], targetLang: "vi" | "zh" | "en"): Promise<{
+    userMessage: { text: string; pinyin?: string; meaning?: string };
+    modelResponse: { text: string; pinyin?: string; meaning?: string };
+  }> {
+    const ai = getAI();
+    const model = "gemini-3.7-flash";
+    const targetLangName = targetLang === "vi" ? "Vietnamese" : targetLang === "zh" ? "Chinese" : "English";
+
+    const prompt = `
+      You are a friendly, patient, and encouraging Vietnamese conversation partner and tutor named Minh (or Mai).
+      Your mission is to help the user practice and learn Vietnamese.
+      When the user sends a message in Vietnamese, English, or Chinese, reply in natural, authentic, everyday Vietnamese.
+      
+      IMPORTANT: You MUST return a JSON response for BOTH the user's message and your response.
+      The "text" field MUST contain natural Vietnamese text.
+      The "meaning" field should provide a clear translation in ${targetLangName}.
+      The "pinyin" field can provide tone guidance / phonetics / helpful learning notes for Vietnamese learners.
+      
+      JSON structure:
+      {
+        "userMessage": {
+          "text": "User's message in Vietnamese (translated to Vietnamese if they spoke English/Chinese, or refined Vietnamese if they wrote Vietnamese)",
+          "pinyin": "Phonetic/Tone tips for this sentence",
+          "meaning": "Translation of user message in ${targetLangName}"
+        },
+        "modelResponse": {
+          "text": "Your reply in authentic, natural Vietnamese",
+          "pinyin": "Pronunciation/Tone guide or vocabulary tips",
+          "meaning": "Translation of your reply in ${targetLangName}"
+        }
+      }
+    `;
+
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: messages.map(m => ({
+          role: m.role,
+          parts: [{ text: m.text }]
+        })),
+        config: {
+          systemInstruction: prompt,
+          responseMimeType: "application/json"
+        }
+      });
+
+      return cleanAndParseJSON(response.text, {
+        userMessage: { text: messages[messages.length - 1]?.text || "", meaning: "" },
+        modelResponse: { text: "Xin chào bạn!", meaning: "Hello friend!" }
+      });
+    } catch (error) {
+      console.error("Gemini Chat Error:", error);
+      throw error;
+    }
   }
 };
-
