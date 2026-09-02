@@ -196,22 +196,27 @@ export default function App() {
   };
 
   const handleAIError = async (error: any) => {
-    const errorMsg = typeof error === 'string' ? error : (error?.message || JSON.stringify(error));
-    if (errorMsg.includes("429") || errorMsg.includes("RESOURCE_EXHAUSTED")) {
-      alert(t.aiQuotaWarning || "Hệ thống AI đang bận hoặc đạt giới hạn lượt dùng, vui lòng thử lại sau giây lát.");
-      return true;
+    const errorCode = error?.code || (error?.status ? `HTTP_${error.status}` : "AI_ERROR");
+    const errorStatus = error?.status || 500;
+    const errorMsg = error?.message || (typeof error === 'string' ? error : JSON.stringify(error));
+
+    let guidance = "";
+    if (errorCode.includes("GEMINI_API_KEY_MISSING") || errorMsg.includes("GEMINI_API_KEY is not configured")) {
+      guidance = "Nguyên nhân: Máy chủ chưa cấu hình biến môi trường GEMINI_API_KEY. Vui lòng thêm GEMINI_API_KEY vào biến môi trường khi deploy.";
+    } else if (errorCode.includes("API_KEY_INVALID") || errorMsg.includes("API key not valid")) {
+      guidance = "Nguyên nhân: Khóa API không hợp lệ hoặc đã bị vô hiệu hóa trên Google AI Studio.";
+    } else if (errorCode.includes("RESOURCE_EXHAUSTED") || errorMsg.includes("429")) {
+      guidance = "Nguyên nhân: Đạt giới hạn lượt gọi miễn phí. Vui lòng chờ 30-60 giây rồi thử lại.";
+    } else if (errorCode.includes("PERMISSION_DENIED") || errorCode.includes("403")) {
+      guidance = "Nguyên nhân: Không có quyền truy cập Gemini API từ khóa API hiện tại.";
     }
 
-    if (
-      errorMsg.includes("API key not valid") || 
-      errorMsg.includes("API_KEY_INVALID") || 
-      errorMsg.includes("API key") || 
-      errorMsg.includes("PERMISSION_DENIED")
-    ) {
-      alert("Hệ thống AI đang được bảo trì hoặc khóa API cần được cập nhật trên máy chủ. Vui lòng liên hệ quản trị viên.");
-      return true;
-    }
-    return false;
+    const alertMessage = `[LỖI AI - MÃ LỖI: ${errorCode} | Status: ${errorStatus}]
+- Chi tiết lỗi: ${errorMsg}
+${guidance ? `\n💡 ${guidance}` : ""}`;
+
+    alert(alertMessage);
+    return true;
   };
 
   const handleAddSingleVocab = async (word: string) => {

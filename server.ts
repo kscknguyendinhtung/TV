@@ -20,13 +20,46 @@ app.post("/api/gemini", async (req, res) => {
   try {
     const { action, payload } = req.body || {};
     if (!action) {
-      return res.status(400).json({ error: "Missing 'action' in request body" });
+      return res.status(400).json({ 
+        error: "Thiếu tham số 'action' trong yêu cầu", 
+        code: "INVALID_REQUEST",
+        status: 400 
+      });
     }
     const result = await handleGeminiAction(action, payload || {});
     res.json(result);
   } catch (error: any) {
     console.error("Server Gemini API Error:", error);
-    res.status(500).json({ error: error?.message || "Internal Server Error" });
+
+    const errorMessage = error?.message || (typeof error === 'string' ? error : JSON.stringify(error)) || "Internal Server Error";
+    let statusCode = error?.status || error?.statusCode || 500;
+    let errorCode = error?.code || "GEMINI_API_ERROR";
+
+    // Detect common Gemini error patterns
+    if (errorMessage.includes("GEMINI_API_KEY is not configured") || errorMessage.includes("GEMINI_API_KEY_MISSING")) {
+      statusCode = 500;
+      errorCode = "GEMINI_API_KEY_MISSING";
+    } else if (errorMessage.includes("API key not valid") || errorMessage.includes("API_KEY_INVALID")) {
+      statusCode = 400;
+      errorCode = "API_KEY_INVALID";
+    } else if (errorMessage.includes("PERMISSION_DENIED") || errorMessage.includes("403")) {
+      statusCode = 403;
+      errorCode = "PERMISSION_DENIED";
+    } else if (errorMessage.includes("RESOURCE_EXHAUSTED") || errorMessage.includes("429") || errorMessage.includes("Quota exceeded")) {
+      statusCode = 429;
+      errorCode = "RESOURCE_EXHAUSTED";
+    } else if (errorMessage.includes("MODEL_NOT_FOUND") || errorMessage.includes("404")) {
+      statusCode = 404;
+      errorCode = "MODEL_NOT_FOUND";
+    }
+
+    res.status(statusCode >= 100 && statusCode < 600 ? statusCode : 500).json({
+      error: errorMessage,
+      message: errorMessage,
+      code: errorCode,
+      status: statusCode,
+      details: error?.stack || null
+    });
   }
 });
 

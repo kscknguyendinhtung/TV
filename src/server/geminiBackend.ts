@@ -21,7 +21,10 @@ export const getBackendGeminiApiKey = (): string => {
 const getAI = () => {
   const apiKey = getBackendGeminiApiKey();
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is not configured on the server. Please set GEMINI_API_KEY in environment variables.");
+    const err = new Error("Chưa cấu hình biến môi trường GEMINI_API_KEY trên máy chủ (Server Environment Variable). Hãy đảm bảo GEMINI_API_KEY đã được thêm vào mục Settings / Deploy.");
+    (err as any).code = "GEMINI_API_KEY_MISSING";
+    (err as any).status = 500;
+    throw err;
   }
   return new GoogleGenAI({
     apiKey,

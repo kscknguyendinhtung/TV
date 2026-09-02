@@ -87,9 +87,11 @@ export default function GrammarTab({ points, setPoints, onUpload, isSyncing }: P
       if (newPoints && newPoints.length > 0) {
         setPoints(prev => [...prev, ...newPoints]);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Grammar OCR Error:", error);
-      alert(t.grammarScanError);
+      const errorCode = error?.code || (error?.status ? `HTTP_${error.status}` : "GRAMMAR_OCR_ERROR");
+      const errorMsg = error?.message || (typeof error === 'string' ? error : JSON.stringify(error));
+      alert(`[Lỗi Quét Ngữ Pháp - Mã lỗi: ${errorCode}]\n${errorMsg}`);
     } finally {
       setIsScanning(false);
       e.target.value = "";
@@ -111,8 +113,10 @@ export default function GrammarTab({ points, setPoints, onUpload, isSyncing }: P
       setUserOrdering([]);
       setShowExplanation(false);
       setShowQuiz(true);
-    } catch (error) {
-      alert(t.grammarQuizGenError);
+    } catch (error: any) {
+      const errorCode = error?.code || (error?.status ? `HTTP_${error.status}` : "QUIZ_GEN_ERROR");
+      const errorMsg = error?.message || (typeof error === 'string' ? error : JSON.stringify(error));
+      alert(`[Lỗi Tạo Bài Tập - Mã lỗi: ${errorCode}]\n${errorMsg}`);
     } finally {
       setIsGeneratingQuiz(false);
     }

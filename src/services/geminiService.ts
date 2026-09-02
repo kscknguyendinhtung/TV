@@ -6,23 +6,40 @@ import { OCRResult, Vocabulary, GrammarPoint, GrammarQuizQuestion } from "../typ
  * and is NEVER exposed to the browser or other users.
  */
 async function callGeminiApi<T>(action: string, payload: any = {}): Promise<T> {
-  const response = await fetch("/api/gemini", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ action, payload })
-  });
+  let response: Response;
+  try {
+    response = await fetch("/api/gemini", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ action, payload })
+    });
+  } catch (netErr: any) {
+    const errorObj = new Error(`Lỗi kết nối mạng: Không thể kết nối đến máy chủ (${netErr?.message || "Network Failed"})`);
+    (errorObj as any).code = "NETWORK_ERROR";
+    (errorObj as any).status = 0;
+    (errorObj as any).originalMessage = netErr?.message;
+    throw errorObj;
+  }
 
   if (!response.ok) {
     let errorDetail = "";
+    let errorCode = `HTTP_${response.status}`;
     try {
       const errJson = await response.json();
       errorDetail = errJson.error || errJson.message || "";
+      if (errJson.code) errorCode = errJson.code;
     } catch {
       errorDetail = await response.text();
     }
-    throw new Error(errorDetail || `Request failed with status ${response.status}`);
+    
+    const displayMsg = errorDetail || `Yêu cầu máy chủ thất bại với mã lỗi HTTP ${response.status}`;
+    const fullError = new Error(displayMsg);
+    (fullError as any).code = errorCode;
+    (fullError as any).status = response.status;
+    (fullError as any).details = errorDetail;
+    throw fullError;
   }
 
   return (await response.json()) as T;
