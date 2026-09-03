@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "regions": ["sin1", "nrt1", "iad1"],
+  "functions": {
+    "api/gemini.ts": {
+      "memory": 1024,
+      "maxDuration": 60
+    },
+    "api/tts.ts": {
+      "memory": 512,
+      "maxDuration": 30
+    }
+  },
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    },
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ]
+}

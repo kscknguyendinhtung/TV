@@ -12,6 +12,8 @@ export const getBackendGeminiApiKey = (): string => {
   return (
     runtimeSharedApiKey ||
     process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GOOGLE_GENAI_API_KEY ||
     process.env.API_KEY ||
     process.env.VITE_GEMINI_API_KEY ||
     ""
